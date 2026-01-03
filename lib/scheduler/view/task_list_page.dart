@@ -379,6 +379,16 @@ class _TaskListPageState extends State<TaskListPage> {
     }
   }
 
+  Widget _mobileHorizontalList() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _filteredTasks.length,
+      itemBuilder: (context, index) {
+        return AssetHorizontalCard(task: _filteredTasks[index]);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -399,14 +409,17 @@ class _TaskListPageState extends State<TaskListPage> {
               builder: (context, constraints) {
                 final width = constraints.maxWidth;
 
-                if (width >= 700) {
+                /// WEB → SAME GRID
+                if (width >= 900) {
                   return _responsiveGrid(width);
                 }
 
-                return _mobilePagination();
+                /// MOBILE + TABLET → SWIGGY STYLE
+                return _mobileHorizontalList();
               },
             ),
           ),
+
         ],
       ),
     );
@@ -431,50 +444,17 @@ class _TaskListPageState extends State<TaskListPage> {
       itemBuilder: (_, i) => AssetCard(task: _filteredTasks[i]),
     );
   }
-
-  // -------- MOBILE PAGINATION --------
-  Widget _mobilePagination() {
-    return Column(
-      children: [
-        Expanded(
-          child: PageView.builder(
-            controller: _pageController,
-            itemCount: _filteredTasks.length,
-            onPageChanged: (i) => setState(() => _currentPage = i),
-            itemBuilder: (_, i) => Padding(
-              padding: const EdgeInsets.all(20),
-              child: AssetCard(task: _filteredTasks[i]),
-            ),
-          ),
-        ),
-
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            _filteredTasks.length,
-            (i) => AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-              height: 8,
-              width: _currentPage == i ? 22 : 8,
-              decoration: BoxDecoration(
-                color: _currentPage == i
-                    ? Colors.blue
-                    : Colors.grey.shade400,
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
   }
-}
+
 
 class AssetCard extends StatefulWidget {
   final Task task;
-  const AssetCard({super.key, required this.task});
 
+  const AssetCard({
+    super.key,
+    required this.task,
+
+  });
 
   @override
   State<AssetCard> createState() => _AssetCardState();
@@ -755,13 +735,9 @@ void main() {
     return expand ? Expanded(child: button) : button;
   }
 
-  Widget _meta(String label, String value) {
-    return Text("$label: $value", style: _small());
-  }
 
-  TextStyle _small() {
-    return TextStyle(fontSize: 13, color: Colors.grey[700]);
-  }
+
+
 
   Widget _viewButton() {
     return Container(
@@ -775,18 +751,6 @@ void main() {
         child: Text("View", style: TextStyle(color: Colors.white, fontSize: 14)),
       ),
     );
-  }
-
-  List<Color> _getStatusGradient(String status) {
-    switch (status) {
-      case "Approved":
-        return [Colors.green.withOpacity(0.7), Colors.greenAccent];
-      case "Rejected":
-        return [Colors.red.withOpacity(0.7), Colors.redAccent];
-      case "Pending":
-      default:
-        return [Colors.orange.withOpacity(0.7), Colors.deepOrange];
-    }
   }
 
 
@@ -872,4 +836,93 @@ class StatusButton extends StatelessWidget {
   }
 }
 
+class AssetHorizontalCard extends StatelessWidget {
+  final Task task;
+  const AssetHorizontalCard({super.key, required this.task});
 
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 140,
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          /// IMAGE
+          ClipRRect(
+            borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
+            child: Image.network(
+              task.imageUrl,
+              width: 120,
+              height: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          ),
+
+          /// CONTENT
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    task.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+
+                  Text("UIN: ${task.uin}",
+                      style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+
+                  Text(
+                    "Scheduled: ${task.scheduledDate.toString().split(' ')[0]}",
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  ),
+
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: task.status == "Approved"
+                            ? Colors.green
+                            : task.status == "Rejected"
+                            ? Colors.red
+                            : Colors.orange,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        task.status,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  )
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
