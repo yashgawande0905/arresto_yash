@@ -78,10 +78,15 @@ class EditAssetsController extends GetxController {
   RxString file_name = "No file chosen".obs;
   RxString fileData = "".obs;
 
-  RxList<dynamic> selectSubAsset = <dynamic>[].obs;
-  RxList<dynamic> selectExpectedResults = <dynamic>[].obs;
-  RxList<MultiSelectItem> subAssetData = <MultiSelectItem>[].obs;
-  RxList<MultiSelectItem> expectedData = <MultiSelectItem>[].obs;
+  RxList<TypeData> selectSubAsset = <TypeData>[].obs;
+  RxList<ExpectedModel> selectExpectedResults = <ExpectedModel>[].obs;
+
+  RxList<MultiSelectItem<TypeData>> subAssetData =
+      <MultiSelectItem<TypeData>>[].obs;
+
+  RxList<MultiSelectItem<ExpectedModel>> expectedData =
+      <MultiSelectItem<ExpectedModel>>[].obs;
+
 
   @override
   void onInit() {
@@ -150,11 +155,18 @@ class EditAssetsController extends GetxController {
           .map((data) => SubAsset.fromJson(data))
           .toList();
 
-      subAssetData.assignAll(subAssedata
-          .map((e) => MultiSelectItem<Typedata>(
-              Typedata(typeId: e.sub_assets_id, typeName: e.sub_assets_code),
-              e.sub_assets_code))
-          .toList());
+      subAssetData.assignAll(
+        subAssedata.map((e) {
+          return MultiSelectItem<TypeData>(
+            TypeData(
+              typeId: e.sub_assets_id,
+              typeName: e.sub_assets_code,
+            ),
+            e.sub_assets_code,
+          );
+        }).toList(),
+      );
+
 
       if (((assetData.value?.component_sub_assets ?? []) as List).isNotEmpty) {
         for (var subdata in assetData.value?.component_sub_assets) {
@@ -213,7 +225,8 @@ class EditAssetsController extends GetxController {
   Future<bool> refreshOrderExpected(List<dynamic> newOrderList) async {
     selectExpectedResults.clear();
     Common.printLog('refreshOrderExpected');
-    for (var exdata in newOrderList) {
+
+    for (ExpectedModel exdata in newOrderList.cast<ExpectedModel>()) {
       final match = expectedData.firstWhereOrNull(
             (e) => e.value.type_id == exdata.type_id,
       );
@@ -222,15 +235,16 @@ class EditAssetsController extends GetxController {
         selectExpectedResults.add(match.value);
       }
     }
+
     selectExpectedResults.refresh();
-    expectedData.refresh();
     return true;
   }
 
   Future<bool> refreshOrderSubAsset(List<dynamic> newOrderList) async {
     selectSubAsset.clear();
     Common.printLog('refreshOrderSubAsset Start -> $newOrderList');
-    for (var subAsset in newOrderList) {
+
+    for (TypeData subAsset in newOrderList.cast<TypeData>()) {
       final match = subAssetData.firstWhereOrNull(
             (e) => e.value.typeId == subAsset.typeId,
       );
@@ -239,8 +253,8 @@ class EditAssetsController extends GetxController {
         selectSubAsset.add(match.value);
       }
     }
+
     selectSubAsset.refresh();
-    subAssetData.refresh();
     Common.printLog('refreshOrderSubAsset End ${selectSubAsset.value}');
     return true;
   }
@@ -360,31 +374,35 @@ class EditAssetsController extends GetxController {
 }
 
 class EditAssets extends StatefulWidget {
-  String title;
-  String assetId;
-  EditAssetsController controller = Get.put(EditAssetsController());
+  final String title;
+  final String assetId;
 
-  EditAssets({super.key, required this.title, required this.assetId}) {
-    controller.getAsset(assetId);
-  }
+  const EditAssets({
+    super.key,
+    required this.title,
+    required this.assetId,
+  });
 
   @override
   State<EditAssets> createState() => _EditAssetsState();
 }
 
 class _EditAssetsState extends State<EditAssets> {
-  EditAssetsController controller = Get.put(EditAssetsController());
+  late final EditAssetsController controller;
 
   BuildContext? contxt;
-
   List byte_data = [];
-
-  var size20 = const SizedBox(height: 20.0);
-
+  final size20 = const SizedBox(height: 20.0);
 
   late ScaffoldMessengerState scaffoldMessenger;
-
   bool isdesktop = false;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = Get.put(EditAssetsController());
+    controller.getAsset(widget.assetId); // ✅ MUST BE HERE
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -399,7 +417,8 @@ class _EditAssetsState extends State<EditAssets> {
     }
     scaffoldMessenger = ScaffoldMessenger.of(context);
 
-    return Obx(() => Scaffold(
+    return Obx(() =>
+        Scaffold(
           body: SingleChildScrollView(
             child: Container(
               padding: EdgeInsets.all(10),
@@ -453,16 +472,16 @@ class _EditAssetsState extends State<EditAssets> {
                                   inactiveBgColor: Colors.grey,
                                   inactiveFgColor: Colors.white,
                                   initialLabelIndex:
-                                      controller.status.value.toLowerCase() ==
-                                              "active"
-                                          ? 1
-                                          : 0,
+                                  controller.status.value.toLowerCase() ==
+                                      "active"
+                                      ? 1
+                                      : 0,
                                   totalSwitches: 2,
                                   labels: const ['', ''],
                                   radiusStyle: true,
                                   onToggle: (index) {
                                     controller.status.value =
-                                        index == 0 ? "inactive" : "active";
+                                    index == 0 ? "inactive" : "active";
                                     Common.printLog('switched to: $index');
                                   },
                                 ),
@@ -558,7 +577,8 @@ class _EditAssetsState extends State<EditAssets> {
                               style: const TextStyle(fontSize: 14),
                               decoration: ThemeHelper().textInputDecoration(
                                   "${getStringTranslate('description')} *",
-                                  "${getStringTranslate('enter_description')} *"),
+                                  "${getStringTranslate(
+                                      'enter_description')} *"),
                               textInputAction: TextInputAction.next,
                               autofillHints: const [AutofillHints.jobTitle],
                             ),
@@ -588,9 +608,9 @@ class _EditAssetsState extends State<EditAssets> {
                               ],
                               border: const Border(
                                   bottom: BorderSide(
-                                color: AppColors.input_underline_color,
-                                width: 1.0,
-                              ))),
+                                    color: AppColors.input_underline_color,
+                                    width: 1.0,
+                                  ))),
                           child: InkWell(
                             focusColor: Colors.transparent,
                             hoverColor: Colors.transparent,
@@ -599,9 +619,9 @@ class _EditAssetsState extends State<EditAssets> {
                             onTap: () async {
                               final result = await FilePicker.platform
                                   .pickFiles(
-                                      type: FileType.custom,
-                                      allowedExtensions: ['jpeg', 'png', 'jpg'],
-                                      allowMultiple: false);
+                                  type: FileType.custom,
+                                  allowedExtensions: ['jpeg', 'png', 'jpg'],
+                                  allowMultiple: false);
 
                               if (result!.files.first != null) {
                                 var fileBytes = result.files.first.bytes;
@@ -621,11 +641,11 @@ class _EditAssetsState extends State<EditAssets> {
                                         alignment: Alignment.bottomLeft,
                                         child: Padding(
                                           padding:
-                                              EdgeInsets.only(bottom: 15.0),
+                                          EdgeInsets.only(bottom: 15.0),
                                           child: Text(
                                             getStringTranslate("choose_file"),
                                             style:
-                                                TextStyle(color: Colors.grey),
+                                            TextStyle(color: Colors.grey),
                                           ),
                                         ))),
                                 Expanded(
@@ -699,11 +719,11 @@ class _EditAssetsState extends State<EditAssets> {
                           child: Container(
                             child: Common.myDropDownWidget(
                                 labelText:
-                                    getStringTranslate('inspection_type') +
-                                        " *",
+                                getStringTranslate('inspection_type') +
+                                    " *",
                                 items: controller.inspections.value,
                                 selectedValue:
-                                    controller.selectInspectionType.value,
+                                controller.selectInspectionType.value,
                                 onChange: (value) {
                                   controller.selectInspectionType.value = value;
                                 }),
@@ -726,15 +746,15 @@ class _EditAssetsState extends State<EditAssets> {
                           decoration: ThemeHelper().inputBoxDecorationShaddow(),
                           child: TextField(
                             controller:
-                                controller.frequencyinspemonth_controller,
+                            controller.frequencyinspemonth_controller,
                             keyboardType: TextInputType.number,
                             style: const TextStyle(fontSize: 14),
                             decoration: ThemeHelper().textInputDecoration(
                                 getStringTranslate(
-                                        'frequency_of_inspection_months') +
+                                    'frequency_of_inspection_months') +
                                     " *",
                                 getStringTranslate(
-                                        'enter_frequency_of_inspection') +
+                                    'enter_frequency_of_inspection') +
                                     " *"),
                             textInputAction: TextInputAction.next,
                           ),
@@ -747,7 +767,7 @@ class _EditAssetsState extends State<EditAssets> {
                           decoration: ThemeHelper().inputBoxDecorationShaddow(),
                           child: TextField(
                             controller:
-                                controller.frequencyinspedays_controller,
+                            controller.frequencyinspedays_controller,
                             keyboardType: TextInputType.number,
                             textAlign: TextAlign.start,
                             style: TextStyle(fontSize: 14),
@@ -796,7 +816,7 @@ class _EditAssetsState extends State<EditAssets> {
                           child: ExpandableTextField(
                             child: TextField(
                               controller:
-                                  controller.ectypecertificate_controller,
+                              controller.ectypecertificate_controller,
                               textAlign: TextAlign.start,
                               style: TextStyle(fontSize: 14),
                               decoration: ThemeHelper().textInputDecoration(
@@ -877,7 +897,7 @@ class _EditAssetsState extends State<EditAssets> {
                           decoration: ThemeHelper().inputBoxDecorationShaddow(),
                           child: TextField(
                             controller:
-                                controller.frequencyinspection_controller,
+                            controller.frequencyinspection_controller,
                             keyboardType: TextInputType.number,
                             style: TextStyle(fontSize: 14),
                             decoration: ThemeHelper().textInputDecoration(
@@ -929,11 +949,11 @@ class _EditAssetsState extends State<EditAssets> {
                               : EdgeInsets.only(bottom: 20),
                           child: Common.myDropDownWidget(
                               labelText:
-                                  getStringTranslate('knowledge_tree_status') +
-                                      " *",
+                              getStringTranslate('knowledge_tree_status') +
+                                  " *",
                               items: controller.statusArr!,
                               selectedValue:
-                                  controller.selectKnowledgetree.value,
+                              controller.selectKnowledgetree.value,
                               onChange: (value) {
                                 controller.selectKnowledgetree.value = value;
                               }),
@@ -972,7 +992,7 @@ class _EditAssetsState extends State<EditAssets> {
                                     'notified_body_test_report'),
                                 items: controller.bodyTestReportArr.value,
                                 selectedValue:
-                                    controller.selectBodyTestrprt.value,
+                                controller.selectBodyTestrprt.value,
                                 onChange: (value) {
                                   controller.selectBodyTestrprt.value = value;
                                 }),
@@ -988,7 +1008,7 @@ class _EditAssetsState extends State<EditAssets> {
                                     'notified_body_article_11b'),
                                 items: controller.articleArr.value,
                                 selectedValue:
-                                    controller.select11bArticle.value,
+                                controller.select11bArticle.value,
                                 onChange: (value) {
                                   controller.select11bArticle.value = value;
                                 }),
@@ -1028,7 +1048,7 @@ class _EditAssetsState extends State<EditAssets> {
                                 labelText: getStringTranslate('asset_category'),
                                 items: controller.assetCategoryArr.value,
                                 selectedValue:
-                                    controller.selectAssetCategory.value,
+                                controller.selectAssetCategory.value,
                                 onChange: (value) {
                                   controller.selectAssetCategory.value = value;
                                 }),
@@ -1037,141 +1057,187 @@ class _EditAssetsState extends State<EditAssets> {
                     ],
                   ),
                   size20,
+
                   ResponsiveRowColumn(
                     rowMainAxisAlignment: MainAxisAlignment.start,
                     rowCrossAxisAlignment: CrossAxisAlignment.start,
                     layout: rowColumnType,
                     children: [
+
+                      // ================= EXPECTED RESULTS =================
                       ResponsiveRowColumnItem(
                         rowFlex: 1,
                         rowFit: FlexFit.tight,
                         child: Container(
                           width: double.infinity,
                           margin: isdesktop
-                              ? EdgeInsets.only(right: 20, bottom: 0)
-                              : EdgeInsets.only(bottom: 20),
+                              ? const EdgeInsets.only(right: 20)
+                              : const EdgeInsets.only(bottom: 20),
                           child: controller.refreshExpectResult.value
                               ? Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
 
-                                      Container(
-                                        margin: EdgeInsets.only(top: 15),
-                                        child: Common.myInkWell(
-                                            ontap: () async {
-                                              final reorderedList =
-                                                  await showDialog<
-                                                      List<dynamic>>(
-                                                context: context,
-                                                builder:
-                                                    (BuildContext context) {
-                                                  return ReorderableListDialog<
-                                                      String>(
-                                                    items: controller
-                                                        .selectExpectedResults
-                                                        .value,
-                                                  );
-                                                },
-                                              );
-                                              if (reorderedList != null) {
-                                                await controller
-                                                    .refreshOrderExpected(
-                                                        reorderedList);
-                                              }
-                                            },
-                                            child:
-                                                Icon(Icons.reorder_outlined)),
-                                      )
-                                    ])
-                              : Container(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  alignment: Alignment.center,
-                                  child:
-                                      const Text("Expected Results Loading..."),
+                              // -------- Expected Results Dropdown --------
+                              Expanded(
+                                child: MultiSelectDialogField(
+                                  searchable: true,
+
+                                  items: controller.expectedData.value,
+                                  // ✅ already MultiSelectItem
+                                  initialValue: controller.selectExpectedResults
+                                      .value,
+                                  title: Text(
+                                    getStringTranslate("expected_results") +
+                                        " *",
+                                  ),
+                                  selectedColor: AppColors.app_main_dark_color,
+                                  separateSelectedItems: true,
+                                  selectedItemsTextStyle: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.black,
+                                  ),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.transparent,
+                                    border: Border(
+                                      bottom: BorderSide(
+                                        width: 1,
+                                        color: AppColors.input_underline_color,
+                                      ),
+                                    ),
+                                  ),
+                                  buttonIcon: const Icon(Icons.arrow_drop_down),
+                                  buttonText: Text(
+                                    getStringTranslate("expected_results") +
+                                        " *",
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  onConfirm: (results) {
+                                    controller.selectExpectedResults.value =
+                                        List.from(results);
+                                  },
                                 ),
+                              ),
+
+                              // -------- Reorder Button --------
+                              Container(
+                                margin: const EdgeInsets.only(top: 15),
+                                child: Common.myInkWell(
+                                  ontap: () async {
+                                    final reorderedList =
+                                    await showDialog<List<dynamic>>(
+                                      context: context,
+                                      builder: (context) {
+                                        return ReorderableListDialog(
+                                          items: controller
+                                              .selectExpectedResults.value,
+                                        );
+                                      },
+                                    );
+
+                                    if (reorderedList != null) {
+                                      await controller
+                                          .refreshOrderExpected(reorderedList);
+                                    }
+                                  },
+                                  child: const Icon(Icons.reorder_outlined),
+                                ),
+                              ),
+                            ],
+                          )
+                              : const Padding(
+                            padding: EdgeInsets.only(top: 10),
+                            child: Center(
+                              child: Text("Expected Results Loading..."),
+                            ),
+                          ),
                         ),
                       ),
 
-
+                      // ================= SUB ASSETS =================
                       ResponsiveRowColumnItem(
                         rowFlex: 1,
                         rowFit: FlexFit.tight,
                         child: controller.refreshSubAsset.value
                             ? Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: MultiSelectDialogField(
-                                      searchable: true,
-                                      items: controller.subAssetData.value,
-                                      reorderble: true,
-                                      initialValue:
-                                          controller.selectSubAsset.value,
-                                      title: Text(
-                                          getStringTranslate("sub_asset") +
-                                              " *"),
-                                      selectedColor:
-                                          AppColors.app_main_dark_color,
-                                      selectedItemsTextStyle: const TextStyle(
-                                          fontSize: 13, color: Colors.black),
-                                      separateSelectedItems: true,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.transparent,
-                                        border: Border(
-                                          bottom: BorderSide(
-                                              width: 1,
-                                              color: AppColors
-                                                  .input_underline_color),
-                                        ),
-                                      ),
-                                      buttonIcon: const Icon(
-                                        Icons.arrow_drop_down,
-                                      ),
-                                      buttonText: Text(
-                                        getStringTranslate("sub_asset") + " *",
-                                        style: TextStyle(
-                                            fontSize: 16, color: Colors.grey),
-                                      ),
-                                      onConfirm: (results) {
-                                        Common.printLog(results);
-                                        controller.selectSubAsset.value =
-                                            results;
-                                      },
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+
+                            // -------- Sub Asset Dropdown --------
+                            Expanded(
+                              child: MultiSelectDialogField(
+                                searchable: true,
+
+                                items: controller.subAssetData.value,
+                                // ✅ already MultiSelectItem
+                                initialValue: controller.selectSubAsset.value,
+                                title: Text(
+                                  getStringTranslate("sub_asset") + " *",
+                                ),
+                                selectedColor: AppColors.app_main_dark_color,
+                                separateSelectedItems: true,
+                                selectedItemsTextStyle: const TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.black,
+                                ),
+                                decoration: const BoxDecoration(
+                                  color: Colors.transparent,
+                                  border: Border(
+                                    bottom: BorderSide(
+                                      width: 1,
+                                      color: AppColors.input_underline_color,
                                     ),
                                   ),
-                                  Visibility(
-                                    visible: true,
-                                    child: Container(
-                                      margin: EdgeInsets.only(top: 15),
-                                      child: Common.myInkWell(
-                                          ontap: () async {
-                                            final reorderedList =
-                                                await showDialog<List<dynamic>>(
-                                              context: context,
-                                              builder: (BuildContext context) {
-                                                return ReorderableListDialog<
-                                                    String>(
-                                                  items: controller
-                                                      .selectSubAsset.value,
-                                                );
-                                              },
-                                            );
-                                            if (reorderedList != null) {
-                                              await controller
-                                                  .refreshOrderSubAsset(
-                                                      reorderedList);
-                                            }
-                                          },
-                                          child: Icon(Icons.reorder_outlined)),
-                                    ),
-                                  )
-                                ],
-                              )
-                            : Container(
-                                padding: const EdgeInsets.only(top: 10),
-                                alignment: Alignment.center,
-                                child: const Text("Sub Assets Loading..."),
+                                ),
+                                buttonIcon: const Icon(Icons.arrow_drop_down),
+                                buttonText: Text(
+                                  getStringTranslate("sub_asset") + " *",
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                                onConfirm: (results) {
+                                  controller.selectSubAsset.value =
+                                      List.from(results);
+                                },
                               ),
+                            ),
+
+                            // -------- Reorder Button --------
+                            Container(
+                              margin: const EdgeInsets.only(top: 15),
+                              child: Common.myInkWell(
+                                ontap: () async {
+                                  final reorderedList =
+                                  await showDialog<List<dynamic>>(
+                                    context: context,
+                                    builder: (context) {
+                                      return ReorderableListDialog(
+                                        items: controller.selectSubAsset.value,
+                                      );
+                                    },
+                                  );
+
+                                  if (reorderedList != null) {
+                                    await controller
+                                        .refreshOrderSubAsset(reorderedList);
+                                  }
+                                },
+                                child: const Icon(Icons.reorder_outlined),
+                              ),
+                            ),
+                          ],
+                        )
+                            : const Padding(
+                          padding: EdgeInsets.only(top: 10),
+                          child: Center(
+                            child: Text("Sub Assets Loading..."),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -1191,10 +1257,10 @@ class _EditAssetsState extends State<EditAssets> {
                                 : EdgeInsets.only(bottom: 20),
                             child: Common.myDropDownWidget(
                                 labelText:
-                                    getStringTranslate('asset_template_type'),
+                                getStringTranslate('asset_template_type'),
                                 items: controller.assetTemplateArr.value,
                                 selectedValue:
-                                    controller.selectAssetTemplate.value,
+                                controller.selectAssetTemplate.value,
                                 onChange: (value) {
                                   controller.selectAssetTemplate.value = value;
                                 }),
@@ -1369,33 +1435,41 @@ class _EditAssetsState extends State<EditAssets> {
   }
 
   editAsset() async {
-    List<int> expectresultstr = [];
-    List<int> subassetstr = [];
-    Common.printLog(
-        "selectExpectedResults=${controller.selectExpectedResults.value}");
-    Common.printLog("selectSubAsset=${controller.selectSubAsset.value}");
-    controller.selectExpectedResults.value.forEach((element) {
-      expectresultstr.add(element.type_id!);
-    });
-    controller.selectSubAsset.value.forEach((element) {
-      subassetstr.add(element.typeId!);
-    });
 
+    // --- Safe extraction of ExpectedModel IDs ---
+    List<int> expectresultstr = [];
+    for (final element in controller.selectExpectedResults) {
+      if (element is ExpectedModel && element.type_id != null) {
+        expectresultstr.add(element.type_id!);
+      }
+    }
+
+// --- Safe extraction of Typedata IDs ---
+    List<int> subassetstr = [];
+    for (final element in controller.selectSubAsset) {
+      if (element is Typedata && element.typeId != null) {
+        subassetstr.add(element.typeId!);
+      }
+    }
+
+    // --- Step 3: Prepare image ---
     var fileData = controller.fileData.isNotEmpty
         ? "data:image/png;base64,${controller.fileData.value}"
         : controller.assetimage_controller.text;
+
+    // --- Step 4: Build API payload ---
     Map datapost = {
       "component_code": controller.assetcode_controller.text,
       "component_name": controller.assetname_controller.text ?? "",
       "component_alias": controller.assetalias_controller.text,
       "component_ean": controller.assetean_controller.text,
       "component_description": controller.description_controller.text,
-      "component_frequency_asset":
-          controller.frequencyinspemonth_controller.text,
+      "component_frequency_asset": controller.frequencyinspemonth_controller
+          .text,
       "component_due_period": controller.dueperioddays_controller.text,
       "freq_hours": controller.frequencyinspection_controller.text,
-      "component_frequency_hours":
-          controller.frequencyinspedays_controller.text,
+      "component_frequency_hours": controller.frequencyinspedays_controller
+          .text,
       "component_lifespan_month": controller.lifespanmonth_controller.text,
       "component_lifespan_hours": controller.lifespanhour_controller.text,
       "component_pdm_frequency": controller.freqprevmaint_controller.text,
@@ -1409,15 +1483,15 @@ class _EditAssetsState extends State<EditAssets> {
       if (controller.selectUom.value != null)
         "component_uom": controller.selectUom.value?.typeId,
       if (controller.selectInspectionType.value != null)
-        "component_inspectiontype":
-            controller.selectInspectionType.value?.typeId,
+        "component_inspectiontype": controller.selectInspectionType.value
+            ?.typeId,
       "component_repair": controller.repairValue.value ? Common.yes : Common.no,
       "component_inspection":
-          controller.inspectionValue.value ? Common.yes : Common.no,
+      controller.inspectionValue.value ? Common.yes : Common.no,
       "component_geo_fancing":
-          controller.geofencingValue.value ? Common.yes : Common.no,
+      controller.geofencingValue.value ? Common.yes : Common.no,
       "component_work_permit":
-          controller.workPermitValue.value ? Common.yes : Common.no,
+      controller.workPermitValue.value ? Common.yes : Common.no,
       if (controller.selectAssetCategory.value != null)
         "component_category": controller.selectAssetCategory.value?.typeId,
       "status": controller.status.value,
@@ -1429,35 +1503,41 @@ class _EditAssetsState extends State<EditAssets> {
           : "",
       if (controller.selectBodyTestrprt.value != null)
         "notified_body_certificate_id":
-            controller.selectBodyTestrprt.value?.typeId,
+        controller.selectBodyTestrprt.value?.typeId,
       if (controller.select11bArticle.value != null)
         "article_11b_certificate_id": controller.select11bArticle.value?.typeId,
       "component_image": fileData ?? ""
     };
 
     var body = json.encode(datapost);
+    Common.printLog("=== API Payload ===");
     Common.printLog(body.toString());
-    String url;
-    url = ApisFile().client_Update_Asset_api +
+
+    // --- Step 5: Make API request ---
+    String url = ApisFile().client_Update_Asset_api +
         controller.assetData.value!.component_id.toString();
-    Common.printLog(url);
+    Common.printLog("API URL: $url");
+
     final response = await ApisRequests().makePutRequest(url, body);
     Map<String, dynamic> mapData = jsonDecode(response.body);
+
+    Common.printLog("API Response: $mapData");
+
+    // --- Step 6: Handle response ---
     if (response.statusCode == 200) {
-      Common.printLog("response $mapData");
       if (mapData['ststus'] == 'success') {
         Common.disposeController<EditAssetsController>();
         Navigator.pop(contxt!, mapData['ststus']);
-        // controller.clearController();
       }
       scaffoldMessenger
           .showSnackBar(SnackBar(content: Text("${mapData['message']}")));
     } else {
-      Common.printLog("error ${response.body}");
+      Common.printLog("API Error: ${response.body}");
       scaffoldMessenger
-          .showSnackBar(SnackBar(content: Text(mapData['message'])));
+          .showSnackBar(SnackBar(content: Text(mapData['message'] ?? "Error")));
     }
   }
 }
+
 
 //-----------------------------------***********
