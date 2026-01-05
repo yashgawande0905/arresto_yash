@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:arresto/networks/ApisRequests.dart';
 import 'package:fluttertoast/fluttertoast.dart' show Fluttertoast;
 
@@ -25,6 +26,7 @@ class Task {
     this.status = "pending",
   });
 
+
   factory Task.fromJson(Map<String, dynamic> json) {
     // 🔹 MongoDB date parsing
     DateTime scheduledDate = DateTime.now();
@@ -44,7 +46,7 @@ class Task {
       scheduledDate: scheduledDate,
       assignedUser: json['assigned_user']?['name'] ?? 'Unassigned',
       imageUrl: json['meta_data']?['component_imagepath'] ??
-          'https://via.placeholder.com/300',
+          'https://picsum.photos/id/237/200/300',
       status: json['status'] ?? 'pending',
     );
   }
@@ -204,6 +206,50 @@ class _TaskListPageState extends State<TaskListPage> {
           ),
         ],
       ),
+    );
+  }
+
+
+  /// Info row for "View" bottom sheet
+  Widget _infoRow(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Text(
+            "$title: ",
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Status option tile for "Change Status" bottom sheet
+  Widget _statusTile(String status, Color color, Task task) {
+    return ListTile(
+      leading: CircleAvatar(backgroundColor: color),
+      title: Text(status),
+      onTap: () async {
+        await _api.makePutRequest(
+          "https://uatapi.arresto.in/api/client/1825/tasks/${task.id}/status",
+          jsonEncode({"status": status}),
+        );
+
+        if (!mounted) return;
+        setState(() {
+          task.status = status;
+        });
+
+        Navigator.of(context, rootNavigator: true).pop();
+// close bottom sheet
+      },
     );
   }
 
@@ -402,7 +448,7 @@ class _TaskListPageState extends State<TaskListPage> {
                           label: const Text("Apply Filter"),
                           onPressed: () {
                             _applyFilter(); // apply only when tick clicked
-                            Navigator.pop(context);
+                            Navigator.of(context, rootNavigator: true).pop();
                           },
                         ),
                       ),
@@ -467,13 +513,57 @@ class _TaskListPageState extends State<TaskListPage> {
 
   Widget _mobileHorizontalList() {
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
       itemCount: _filteredTasks.length,
       itemBuilder: (context, index) {
-        return AssetHorizontalCard(task: _filteredTasks[index]);
+        final task = _filteredTasks[index];
+
+        return AssetHorizontalCard(
+          task: task,
+
+          // -------- DELETE --------
+          onDelete: () async {
+            await _api.makeDeleteRequest(
+              "https://uatapi.arresto.in/api/client/1825/tasks/${task.id}",
+            );
+
+            if (!mounted) return;
+
+            setState(() {
+              _filteredTasks.removeWhere((t) => t.id == task.id);
+            });
+          },
+
+          // -------- STATUS CHANGE CALLBACK (OPTIONAL API HIT) --------
+          onChangeStatus: () async {
+            // If later you want API hit, do it here
+            // For now UI already updates inside card
+          },
+
+          // -------- RESCHEDULE --------
+          onReschedule: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: task.scheduledDate,
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2030),
+            );
+
+            if (picked != null) {
+              setState(() => task.scheduledDate = picked);
+
+              await _api.makePutRequest(
+                "https://uatapi.arresto.in/api/client/1825/tasks/${task.id}/reschedule",
+                jsonEncode({"scheduled_date": picked.toIso8601String()}),
+              );
+            }
+          },
+        );
       },
     );
   }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -505,7 +595,7 @@ class _TaskListPageState extends State<TaskListPage> {
                   return _responsiveGrid(width);
                 }
 
-                /// MOBILE + TABLET → SWIGGY STYLE
+                /// MOBILE + TABLET → STYLE
                 return _mobileHorizontalList();
               },
             ),
@@ -675,48 +765,88 @@ class _AssetCardState extends State<AssetCard> {
                 /// ACTION BUTTONS RESPONSIVE
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    final isMobile = constraints.maxWidth < 500;
+                    final bool isMobile = constraints.maxWidth < 500;
+                    final bool isRealMobile = !kIsWeb && isMobile;
+
+                    final double btnWidth =
+                    isMobile ? (constraints.maxWidth / 2 - 12) : 120.0;
+
                     return Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       alignment: WrapAlignment.spaceBetween,
                       children: [
-                        _actionBtn("Change Status", Icons.sync, () {
-                          setState(() {
-                            _showStatusOptions = !_showStatusOptions;
-                          });
-                        }, width: isMobile ? (constraints.maxWidth / 2 - 12) : 120),
+                        // CHANGE STATUS
+                        SizedBox(
+                          width: btnWidth,
+                          child: StatusButton(
+                            statusText: "Change Status",
+                            icon: Icons.sync,
+                            iconOnly: isRealMobile, // ✅ ONLY MOBILE
+                            gradientColors: const [Colors.blue, Colors.blueAccent],
+                            onTap: () {
+                              setState(() {
+                                _showStatusOptions = !_showStatusOptions;
+                              });
+                            },
+                          ),
+                        ),
 
-                        _actionBtn("Reschedule", Icons.calendar_month, () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: task.scheduledDate,
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime(2030),
-                          );
+                        // RESCHEDULE
+                        SizedBox(
+                          width: btnWidth,
+                          child: StatusButton(
+                            statusText: "Reschedule",
+                            icon: Icons.calendar_month,
+                            iconOnly: isRealMobile,
+                            gradientColors: const [Colors.indigo, Colors.indigoAccent],
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: task.scheduledDate,
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime(2030),
+                              );
+                              if (picked != null) {
+                                setState(() => task.scheduledDate = picked);
+                                widget.onReschedule(picked);
+                              }
+                            },
+                          ),
+                        ),
 
-                          if (picked != null) {
-                            setState(() {
-                              task.scheduledDate = picked;
-                            });
+                        // VIEW
+                        SizedBox(
+                          width: btnWidth,
+                          child: StatusButton(
+                            statusText: "View",
+                            icon: Icons.visibility,
+                            iconOnly: isRealMobile,
+                            gradientColors: const [Colors.teal, Colors.tealAccent],
+                            onTap: () {
+                              setState(() {
+                                _showAssignedInfo = !_showAssignedInfo;
+                              });
+                            },
+                          ),
+                        ),
 
-                            widget.onReschedule(picked); // ✅ parent API
-                          }
-                        }, width: isMobile ? (constraints.maxWidth / 2 - 12) : 120),
-
-                        _actionBtn("View", Icons.visibility, () {
-                          setState(() {
-                            _showAssignedInfo = !_showAssignedInfo;
-                          });
-                        }, width: isMobile ? (constraints.maxWidth / 2 - 12) : 120),
-
-                        _actionBtn("Delete", Icons.delete, () {
-                          widget.onDelete(); // ✅ parent API
-                        }),
+                        // DELETE
+                        SizedBox(
+                          width: btnWidth,
+                          child: StatusButton(
+                            statusText: "Delete",
+                            icon: Icons.delete,
+                            iconOnly: isRealMobile,
+                            gradientColors: const [Colors.red, Colors.redAccent],
+                            onTap: widget.onDelete,
+                          ),
+                        ),
                       ],
                     );
                   },
                 ),
+
 
                 /// STATUS DROPDOWN
                 Visibility(
@@ -735,7 +865,7 @@ class _AssetCardState extends State<AssetCard> {
                             });
 
                             widget.onStatusChange(s);
-                             // ✅ parent API
+                            // ✅ parent API
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
@@ -801,10 +931,14 @@ class _AssetCardState extends State<AssetCard> {
           width: width,
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [Colors.blue, Colors.blueAccent]),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Row(
+              gradient: LinearGradient(
+                colors: text == "Delete"
+                    ? [Colors.red, Colors.redAccent]
+                    : [Colors.blue, Colors.blueAccent],
+              ),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icon, size: 16, color: Colors.white),
@@ -833,50 +967,55 @@ class _AssetCardState extends State<AssetCard> {
 
 
 class StatusButton extends StatelessWidget {
-  final String statusText;       // Pending / Approved / Rejected
-  final List<Color> gradientColors; // Gradient colors
-  final VoidCallback? onTap;     // Optional tap callback
+  final String statusText;
+  final List<Color> gradientColors;
+  final VoidCallback? onTap;
+  final IconData icon;
+  final bool iconOnly; // 👈 NEW
 
   const StatusButton({
     super.key,
     required this.statusText,
     required this.gradientColors,
+    required this.icon,
     this.onTap,
+    this.iconOnly = false, // 👈 default = text + icon
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: gradientColors),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.white.withOpacity(0.35)),
-                boxShadow: [
-                  BoxShadow(
-                    color: gradientColors.last.withOpacity(0.35),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Text(
-                  statusText,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: gradientColors),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: gradientColors.last.withOpacity(0.35),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Center(
+          child: iconOnly
+              ? Icon(icon, color: Colors.white, size: 20) // 📱 MOBILE
+              : Row( // 💻 TAB / WEB
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                statusText,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -884,49 +1023,224 @@ class StatusButton extends StatelessWidget {
   }
 }
 
-class AssetHorizontalCard extends StatelessWidget {
+class AssetHorizontalCard extends StatefulWidget {
   final Task task;
-  const AssetHorizontalCard({super.key, required this.task});
+  final VoidCallback onDelete;
+  final VoidCallback onChangeStatus;
+  final VoidCallback onReschedule;
+
+  const AssetHorizontalCard({
+    super.key,
+    required this.task,
+    required this.onDelete,
+    required this.onChangeStatus,
+    required this.onReschedule,
+  });
 
   @override
+  State<AssetHorizontalCard> createState() => _AssetHorizontalCardState();
+}
+
+class _AssetHorizontalCardState extends State<AssetHorizontalCard> {
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case "Approved":
+        return Colors.green;
+      case "Rejected":
+        return Colors.red;
+      default:
+        return Colors.orange;
+    }
+  }
+
+  // ================= VIEW ASSET (BOTTOM SHEET) =================
+  // ================= VIEW (CENTER DIALOG) =================
+  void _showViewDialog() {
+    showDialog(
+      context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Asset Details",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 14),
+
+                _infoRow("Name", widget.task.name),
+                _infoRow("UIN", widget.task.uin),
+                _infoRow("Type", widget.task.type),
+                _infoRow("Status", widget.task.status),
+
+                const SizedBox(height: 18),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text("Close"),
+                  ),
+                )
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+// ================= CHANGE STATUS (CENTER DIALOG) =================
+  void _showChangeStatusDialog() {
+    showDialog(
+      context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Change Status",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 14),
+
+                _statusDialogTile("Approved", Colors.green, dialogContext),
+                _statusDialogTile("Pending", Colors.orange, dialogContext),
+                _statusDialogTile("Rejected", Colors.red, dialogContext),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _statusDialogTile(
+      String status,
+      Color color,
+      BuildContext dialogContext,
+      ) {
+    return ListTile(
+      title: Text(status),
+      trailing: Icon(Icons.circle, color: color),
+      onTap: () {
+        setState(() {
+          widget.task.status = status;
+        });
+
+        widget.onChangeStatus();
+        Navigator.of(dialogContext).pop(); // ✅ close dialog safely
+      },
+    );
+  }
+
+
+
+  Widget _statusTile(String status, Color color) {
+    return ListTile(
+      title: Text(status),
+      trailing: Icon(Icons.circle, color: color),
+      onTap: () {
+        setState(() {
+          widget.task.status = status;
+        });
+        widget.onChangeStatus();
+        Navigator.of(context, rootNavigator: true).pop();
+      },
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(
+              "$label:",
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+
+  Widget _dragHandle() {
+    return Center(
+      child: Container(
+        width: 42,
+        height: 4,
+        decoration: BoxDecoration(
+          color: Colors.grey[400],
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
+
+  // ================= MAIN UI =================
+  @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
     return Container(
-      height: 140,
-      margin: const EdgeInsets.only(bottom: 16),
+      height: 150,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black12,
             blurRadius: 12,
-            offset: const Offset(0, 6),
+            offset: Offset(0, 6),
           ),
         ],
       ),
       child: Row(
         children: [
-          /// IMAGE
+          // IMAGE
           ClipRRect(
             borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
             child: Image.network(
-              task.imageUrl,
-              width: 120,
+              widget.task.imageUrl,
+              width: screenWidth * 0.35,
               height: double.infinity,
               fit: BoxFit.cover,
             ),
           ),
 
-          /// CONTENT
+          // NAME + UIN
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.only(left: 10, top: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    task.name,
+                    widget.task.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -934,42 +1248,82 @@ class AssetHorizontalCard extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-
-                  Text("UIN: ${task.uin}",
-                      style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-
+                  const SizedBox(height: 4),
                   Text(
-                    "Scheduled: ${task.scheduledDate.toString().split(' ')[0]}",
-                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                    "UIN: ${widget.task.uin}",
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700]),
                   ),
-
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: task.status == "Approved"
-                            ? Colors.green
-                            : task.status == "Rejected"
-                            ? Colors.red
-                            : Colors.orange,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        task.status,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  )
                 ],
               ),
             ),
           ),
+
+          // STATUS + ACTIONS
+          Padding(
+            padding: const EdgeInsets.only(top: 12, right: 10),
+            child: Column(
+              children: [
+                // STATUS PILL
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(widget.task.status),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    widget.task.status,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // ICON GRID
+                SizedBox(
+                  width: 80,
+                  height: 80,
+                  child: GridView.count(
+                    crossAxisCount: 2,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    children: [
+                      _icon(Icons.sync, Colors.blue, _showChangeStatusDialog),
+                      _icon(Icons.visibility, Colors.teal, _showViewDialog),
+                      _icon(Icons.calendar_month, Colors.indigo, widget.onReschedule),
+                      _icon(Icons.delete, Colors.red, widget.onDelete),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _icon(IconData icon, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [color.withOpacity(0.85), color],
+          ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.35),
+              blurRadius: 6,
+              offset: const Offset(0, 3),
+            )
+          ],
+        ),
+        child: Icon(icon, color: Colors.white, size: 26),
       ),
     );
   }
