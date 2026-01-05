@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
+import 'dart:convert';
+import 'package:arresto/networks/ApisRequests.dart';
+import 'package:fluttertoast/fluttertoast.dart' show Fluttertoast;
 
 class Task {
   final String id;
   final String name;
   final String uin;
   final String type;
-  late final DateTime scheduledDate;
+  DateTime scheduledDate;
   final String assignedUser;
   final String imageUrl;
-  String status; // NEW FIELD
+  String status;
 
   Task({
     required this.id,
@@ -19,32 +22,41 @@ class Task {
     required this.scheduledDate,
     required this.assignedUser,
     required this.imageUrl,
-    this.status = "Pending", // default value
+    this.status = "pending",
   });
-}
 
-final List<Task> tasks = [
-  Task(
-    id: '1',
-    name: 'MacBook Pro',
-    uin: 'UIN-10234',
-    type: 'Laptop',
-    scheduledDate: DateTime(2025, 1, 15),
-    assignedUser: 'Yash G',
-    imageUrl:
-    'https://images.unsplash.com/photo-1517336714731-489689fd1ca8',
-  ),
-  Task(
-    id: '2',
-    name: 'iMac',
-    uin: 'UIN-56789',
-    type: 'Desktop',
-    scheduledDate: DateTime(2025, 1, 20),
-    assignedUser: 'Admin',
-    imageUrl:
-    'https://images.unsplash.com/photo-1527443154391-507e9dc6c5cc',
-  ),
-];
+  factory Task.fromJson(Map<String, dynamic> json) {
+    // 🔹 MongoDB date parsing
+    DateTime scheduledDate = DateTime.now();
+    if (json['schedule_date'] != null &&
+        json['schedule_date']['\$date'] != null &&
+        json['schedule_date']['\$date']['\$numberLong'] != null) {
+      scheduledDate = DateTime.fromMillisecondsSinceEpoch(
+        int.parse(json['schedule_date']['\$date']['\$numberLong']),
+      );
+    }
+
+    return Task(
+      id: json['_id'].toString(),
+      name: json['meta_data']?['component_name'] ?? 'Unknown Asset',
+      uin: json['field_value'] ?? '',
+      type: json['type'] ?? '',
+      scheduledDate: scheduledDate,
+      assignedUser: json['assigned_user']?['name'] ?? 'Unassigned',
+      imageUrl: json['meta_data']?['component_imagepath'] ??
+          'https://via.placeholder.com/300',
+      status: json['status'] ?? 'pending',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      "id": id,
+      "status": status,
+      "scheduled_date": scheduledDate.toIso8601String(),
+    };
+  }
+}
 
 class TaskListPage extends StatefulWidget {
   const TaskListPage({super.key});
@@ -54,6 +66,11 @@ class TaskListPage extends StatefulWidget {
 }
 
 class _TaskListPageState extends State<TaskListPage> {
+
+  final ApisRequests _api = ApisRequests();
+  List<Task> tasks = [];
+  List<Task> _filteredTasks = [];
+  bool _loading = true;
   final PageController _pageController = PageController();
   int _currentPage = 0;
 
@@ -62,14 +79,49 @@ class _TaskListPageState extends State<TaskListPage> {
   DateTime? _fromDate;
   DateTime? _toDate;
   final TextEditingController _searchController = TextEditingController();
-  List<Task> _filteredTasks = [];
   bool _isExactDate = true;
 
   @override
   void initState() {
     super.initState();
-    _filteredTasks = tasks;
+    _loadTasksFromApi();
   }
+
+  Future<void> _loadTasksFromApi() async {
+    try {
+      final response = await _api.makeGetRequest(
+        "https://uatapi.arresto.in/api/client/1825/tasks",
+      );
+
+      debugPrint("STATUS => ${response.statusCode}");
+      debugPrint("BODY => ${response.body}");
+
+      if (response.statusCode != 200) {
+        throw Exception("HTTP ${response.statusCode}");
+      }
+
+      final decoded = jsonDecode(response.body);
+
+      // 🔒 SAFE PARSING
+      if (decoded is Map && decoded.containsKey('data')) {
+        final List list = decoded['data'];
+
+        setState(() {
+          tasks = list.map((e) => Task.fromJson(e)).toList();
+          _filteredTasks = tasks;
+          _loading = false;
+        });
+      } else {
+        throw Exception("Invalid response format");
+      }
+    } catch (e) {
+      _loading = false;
+      Fluttertoast.showToast(msg: "Failed to load tasks");
+      debugPrint("TASK LOAD ERROR => $e");
+    }
+  }
+
+
 
   void _onSearch(String query) {
     setState(() {
@@ -83,6 +135,7 @@ class _TaskListPageState extends State<TaskListPage> {
     });
     _pageController.jumpToPage(0);
   }
+
 
   Widget _topBar() {
     return Padding(
@@ -105,7 +158,7 @@ class _TaskListPageState extends State<TaskListPage> {
                 ],
               ),
               child: TextField(
-                controller: _searchController,   // <<--- USE SEARCH CONTROLLER
+                controller: _searchController, // <<--- USE SEARCH CONTROLLER
                 onChanged: (_) => _applyFilter(),
                 decoration: const InputDecoration(
                   icon: Icon(Icons.search),
@@ -153,6 +206,38 @@ class _TaskListPageState extends State<TaskListPage> {
       ),
     );
   }
+
+  Widget _dateBox({
+    required String label,
+    required DateTime? date,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 46,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              date == null
+                  ? label
+                  : date.toString().split(' ')[0],
+              style: const TextStyle(fontSize: 14),
+            ),
+            const Icon(Icons.calendar_today, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
 
   void _openFilter() {
     showDialog(
@@ -331,6 +416,7 @@ class _TaskListPageState extends State<TaskListPage> {
       },
     );
   }
+
   void _applyFilter() {
     final filterValue = _filterController.text.toLowerCase();
 
@@ -391,6 +477,11 @@ class _TaskListPageState extends State<TaskListPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -441,24 +532,62 @@ class _TaskListPageState extends State<TaskListPage> {
         crossAxisSpacing: 24,
         childAspectRatio: 0.72,
       ),
-      itemBuilder: (_, i) => AssetCard(task: _filteredTasks[i]),
+      itemBuilder: (_, i) =>
+          AssetCard(
+            task: _filteredTasks[i],
+
+            onDelete: () async {
+              await _api.makeDeleteRequest(
+                "https://uatapi.arresto.in/api/client/1825/tasks/${_filteredTasks[i].id}",
+              );
+
+              setState(() {
+                _filteredTasks.removeWhere((t) => t.id == _filteredTasks[i].id);
+              });
+            },
+
+            onReschedule: (pickedDate) async {
+              await _api.makePutRequest(
+                "https://uatapi.arresto.in/api/client/1825/tasks/${_filteredTasks[i].id}/reschedule",
+                jsonEncode({
+                  "scheduled_date": pickedDate.toIso8601String(),
+                }),
+              );
+            },
+
+            onStatusChange: (status) async {
+              await _api.makePutRequest(
+                "https://uatapi.arresto.in/api/client/1825/tasks/${_filteredTasks[i].id}/status",
+                jsonEncode({"status": status}),
+              );
+            },
+          ),
+
     );
   }
-  }
+
+}
 
 
 class AssetCard extends StatefulWidget {
   final Task task;
 
+  final VoidCallback onDelete;
+  final Function(DateTime) onReschedule;
+  final Function(String) onStatusChange;
+
   const AssetCard({
     super.key,
     required this.task,
-
+    required this.onDelete,
+    required this.onReschedule,
+    required this.onStatusChange,
   });
 
   @override
   State<AssetCard> createState() => _AssetCardState();
 }
+
 
 class _AssetCardState extends State<AssetCard> {
   bool _showAssignedInfo = false;
@@ -557,6 +686,7 @@ class _AssetCardState extends State<AssetCard> {
                             _showStatusOptions = !_showStatusOptions;
                           });
                         }, width: isMobile ? (constraints.maxWidth / 2 - 12) : 120),
+
                         _actionBtn("Reschedule", Icons.calendar_month, () async {
                           final picked = await showDatePicker(
                             context: context,
@@ -564,18 +694,25 @@ class _AssetCardState extends State<AssetCard> {
                             firstDate: DateTime(2000),
                             lastDate: DateTime(2030),
                           );
+
                           if (picked != null) {
                             setState(() {
                               task.scheduledDate = picked;
                             });
+
+                            widget.onReschedule(picked); // ✅ parent API
                           }
                         }, width: isMobile ? (constraints.maxWidth / 2 - 12) : 120),
+
                         _actionBtn("View", Icons.visibility, () {
                           setState(() {
                             _showAssignedInfo = !_showAssignedInfo;
                           });
                         }, width: isMobile ? (constraints.maxWidth / 2 - 12) : 120),
-                        _actionBtn("Delete", Icons.delete, () {}, width: isMobile ? (constraints.maxWidth / 2 - 12) : 120),
+
+                        _actionBtn("Delete", Icons.delete, () {
+                          widget.onDelete(); // ✅ parent API
+                        }),
                       ],
                     );
                   },
@@ -588,36 +725,39 @@ class _AssetCardState extends State<AssetCard> {
                     padding: const EdgeInsets.only(top: 10),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: ["Pending", "Approved", "Rejected"]
-                          .map((s) => GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _statusSelection = s;
-                            widget.task.status = s;
-                            _showStatusOptions = false;
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 6, horizontal: 14),
-                          decoration: BoxDecoration(
-                            color: _getStatusColor(s),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Text(
-                            s,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
+                      children: ["Pending", "Approved", "Rejected"].map((s) {
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _statusSelection = s;
+                              widget.task.status = s;
+                              _showStatusOptions = false;
+                            });
+
+                            widget.onStatusChange(s);
+                             // ✅ parent API
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
+                            decoration: BoxDecoration(
+                              color: _getStatusColor(s),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Text(
+                              s,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
-                        ),
-                      ))
-                          .toList(),
+                        );
+                      }).toList(),
                     ),
                   ),
                 ),
+
 
                 /// ASSIGNED INFO
                 Visibility(
@@ -687,103 +827,11 @@ class _AssetCardState extends State<AssetCard> {
 
 
 // ---------------- MAIN ----------------
-void main() {
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: TaskListPage(),
-  ));
-}
-
-  // ------------------ METHODS INSIDE CLASS ------------------
-
-  void _openCalendar(BuildContext context) {
-    showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2030),
-    );
-  }
-
-  Widget _glassButton(String text, List<Color> gradientColors, VoidCallback onTap,
-      {bool expand = true}) {
-    Widget button = GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-            height: 40,
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: gradientColors),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white.withOpacity(0.35)),
-            ),
-            child: Text(
-              text,
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    return expand ? Expanded(child: button) : button;
-  }
+// ------------------ METHODS INSIDE CLASS ------------------
 
 
 
 
-
-  Widget _viewButton() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.blue,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: const Center(
-        child: Text("View", style: TextStyle(color: Colors.white, fontSize: 14)),
-      ),
-    );
-  }
-
-
-Widget _dateBox({
-  required String label,
-  required DateTime? date,
-  required VoidCallback onTap,
-}) {
-  return GestureDetector(
-    onTap: onTap,
-    child: Container(
-      height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            date == null
-                ? label
-                : date.toString().split(' ')[0],
-            style: const TextStyle(fontSize: 14),
-          ),
-          const Icon(Icons.calendar_today, size: 18),
-        ],
-      ),
-    ),
-  );
-}
 class StatusButton extends StatelessWidget {
   final String statusText;       // Pending / Approved / Rejected
   final List<Color> gradientColors; // Gradient colors
