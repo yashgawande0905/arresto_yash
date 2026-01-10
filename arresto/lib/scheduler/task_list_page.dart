@@ -1,14 +1,10 @@
 import 'package:flutter/material.dart';
-import 'dart:ui';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:arresto/networks/ApisRequests.dart';
 import 'package:fluttertoast/fluttertoast.dart' show Fluttertoast;
-
-
 
 
 // ===================== THEME =====================
@@ -29,8 +25,8 @@ class Task {
   final String assignedUser;
   final String imageUrl;
   String status;
-
   bool selected; // ✅ NEW
+
 
   Task({
     required this.id,
@@ -42,6 +38,10 @@ class Task {
     required this.imageUrl,
     this.status = "pending",
     this.selected = false, // ✅ default
+    bool lockParentScroll = false,
+
+
+
   });
 
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -84,7 +84,12 @@ class TaskListPage extends StatefulWidget {
 
 class _TaskListPageState extends State<TaskListPage> {
   final ApisRequests _api = ApisRequests();
-  final TextEditingController _search = TextEditingController();
+  final ScrollController _listCtrl = ScrollController();
+  int get selectedCount =>
+      filtered.where((t) => t.selected).length;
+
+
+  bool sidebarCollapsed = false;
 
   bool isDemoMode = true;
 // 🔥 true = dummy cards
@@ -372,7 +377,7 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
 
-    void _searchTask(String value) {
+  void _searchTask(String value) {
     setState(() {
       filtered = tasks.where((t) {
         final q = value.toLowerCase();
@@ -427,35 +432,644 @@ class _TaskListPageState extends State<TaskListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isWeb = MediaQuery
-        .of(context)
-        .size
-        .width > 900;
+    final bool isWeb = MediaQuery.of(context).size.width > 900;
 
     return Scaffold(
       backgroundColor: pageBg,
-      appBar: AppBar(
+      appBar: isWeb
+          ? null
+          : AppBar(
         backgroundColor: headerBg,
         elevation: 0,
       ),
-      body: Column(
+      body: isWeb ? _webBody(context) : _mobileBody(),
+    );
+  }
+
+  Widget _mobileBody() {
+    return Column(
+      children: [
+        _topBar(),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView.builder(
+            controller: _listCtrl,
+            padding: const EdgeInsets.only(top: 8),
+            itemCount: filtered.length,
+            itemBuilder: (_, i) => _mobileRow(filtered[i]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _webBody(BuildContext context) {
+    return Column(
+      children: [
+        _webTopBar(),
+        Expanded(
+          child: Row(
+            children: [
+              _InlineSideBar(
+                collapsed: sidebarCollapsed,
+                onAddScheduler: _addScheduler,
+                onExportPdf: _exportPdf,
+              ),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _webDashboard(context),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openAdvancedFilter() {
+    final TextEditingController uinCtrl = TextEditingController();
+    final TextEditingController typeCtrl = TextEditingController();
+
+    DateTime? fromDate;
+    DateTime? toDate;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setD) {
+            return AlertDialog(
+              title: const Text("Advanced Filter"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 🔎 UIN (EXACT)
+                  TextField(
+                    controller: uinCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "UIN (Exact match)",
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // 🧩 TYPE (EXACT)
+                  TextField(
+                    controller: typeCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Type (Exact match)",
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // 📅 DATE RANGE
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final d = await showDatePicker(
+                              context: ctx,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (d != null) {
+                              setD(() => fromDate = d);
+                            }
+                          },
+                          child: Text(
+                            fromDate == null
+                                ? "From date"
+                                : fromDate!.toString().split(' ')[0],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final d = await showDatePicker(
+                              context: ctx,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (d != null) {
+                              setD(() => toDate = d);
+                            }
+                          },
+                          child: Text(
+                            toDate == null
+                                ? "To date"
+                                : toDate!.toString().split(' ')[0],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                // 🧹 CLEAR
+                TextButton(
+                  onPressed: () {
+                    setState(() => filtered = List.from(tasks));
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text("Clear"),
+                ),
+
+                // ✅ APPLY
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      filtered = tasks.where((t) {
+                        if (uinCtrl.text.isNotEmpty &&
+                            t.uin != uinCtrl.text) return false;
+
+                        if (typeCtrl.text.isNotEmpty &&
+                            t.type != typeCtrl.text) return false;
+
+                        if (fromDate != null &&
+                            t.scheduledDate.isBefore(fromDate!)) return false;
+
+                        if (toDate != null &&
+                            t.scheduledDate.isAfter(toDate!)) return false;
+
+                        return true;
+                      }).toList();
+                    });
+
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text("Apply"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+
+  Widget _webTopBar() {
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: surface,
+        border: Border(bottom: BorderSide(color: border)),
+      ),
+      child: Row(
         children: [
-          _topBar(),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : ListView.builder(
-              padding: const EdgeInsets.only(top: 8),
-              itemCount: filtered.length,
-              itemBuilder: (_, i) =>
-              isWeb ? _webRow(filtered[i]) : _mobileRow(filtered[i]),
+          // ☰ MENU + TITLE (ALIGNED WITH SIDEBAR)
+          SizedBox(
+            width: sidebarCollapsed ? 72 : 240,
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.menu),
+                  color: textMain,
+                  onPressed: () {
+                    setState(() {
+                      sidebarCollapsed = !sidebarCollapsed;
+                    });
+                  },
+                ),
+                if (!sidebarCollapsed)
+                  Text(
+                    "Scheduler",
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: textMain,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const Spacer(),
+
+          // 🔍 SEARCH FIELD (WEB)
+          if (showSearch)
+            SizedBox(
+              width: 260,
+              child: TextField(
+                controller: searchCtrl,
+                autofocus: true,
+                onChanged: _searchTask,
+                decoration: InputDecoration(
+                  hintText: "Search scheduler...",
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      setState(() {
+                        showSearch = false;
+                        searchCtrl.clear();
+                        filtered = List.from(tasks);
+                      });
+                    },
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+
+          // 🔍 SEARCH ICON
+          IconButton(
+            icon: const Icon(Icons.search),
+            color: textMain,
+            onPressed: () {
+              setState(() {
+                showSearch = !showSearch;
+              });
+            },
+          ),
+
+          // ☑️ SELECT ALL (TRI-STATE)
+          Checkbox(
+            tristate: true,
+            value: isAllSelected
+                ? true
+                : isPartiallySelected
+                ? null
+                : false,
+            onChanged: (val) {
+              setState(() {
+                if (val == true) {
+                  selectionMode = true;
+                  for (var t in filtered) {
+                    t.selected = true;
+                  }
+                } else {
+                  selectionMode = false;
+                  for (var t in filtered) {
+                    t.selected = false;
+                  }
+                }
+              });
+            },
+          ),
+
+          // 🗑 DELETE (ONLY WHEN SELECTED)
+          if (hasSelection)
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              color: Colors.red,
+              onPressed: _bulkDelete,
+            ),
+
+          // 🔽 FILTER + BULK STATUS
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.filter_list),
+            onSelected: (value) {
+              if (value == "filter") {
+                _openAdvancedFilter();
+              } else {
+                _bulkChangeStatus(value);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: "filter",
+                child: Text("Advanced Filter"),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: "Approved",
+                child: Text("Mark Approved"),
+              ),
+              PopupMenuItem(
+                value: "Rejected",
+                child: Text("Mark Rejected"),
+              ),
+              PopupMenuItem(
+                value: "Pending",
+                child: Text("Mark Pending"),
+              ),
+            ],
+          ),
+
+          const SizedBox(width: 12),
+
+          const CircleAvatar(
+            radius: 16,
+            backgroundImage: NetworkImage("https://i.pravatar.cc/150"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webDashboard(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _webStatsRow(),
+          const SizedBox(height: 20),
+          _webGrid(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _webStatsRow() {
+    return Row(
+      children: [
+        Expanded(child: _stat("Total Schedulers", tasks.length.toString())),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _stat(
+            "Pending",
+            tasks.where((t) => t.status == "Pending").length.toString(),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _stat(
+            "Approved",
+            tasks.where((t) => t.status == "Approved").length.toString(),
+          ),
+        ),
+        const SizedBox(width: 12),
+        _csvCard(),
+      ],
+    );
+  }
+
+
+  Widget _stat(String title, String value) {
+    return Container(
+      height: 100,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(color: textMuted)),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              color: textMain,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ],
       ),
-
     );
   }
+  void _uploadCsv() {
+    Fluttertoast.showToast(msg: "CSV upload coming next");
+  }
+
+  Widget _csvCard() {
+    return Container(
+      width: 260,
+      height: 100,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          const Text("Data Quality"),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(value: 0),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            onPressed: _uploadCsv,
+            child: const Text("Upload CSV"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webGrid(BuildContext context) {
+    final double cardWidth =
+        (MediaQuery.of(context).size.width - 300) / 2;
+
+    return Wrap(
+      spacing: 16,
+      runSpacing: 16,
+      children: filtered.map((task) {
+        return _webCard(task, cardWidth);
+      }).toList(),
+    );
+  }
+
+  Widget _webCard(Task task, double width) {
+    final bool defect = task.name.isEmpty || task.uin.isEmpty;
+
+    return Container(
+      width: width,
+      height: 170,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(18),
+        border: defect ? Border.all(color: Colors.red) : null,
+      ),
+      child: Row(
+        children: [
+          // 🖼 LEFT – IMAGE (35%)
+          Expanded(
+            flex: 35,
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.network(
+                    task.imageUrl,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                  ),
+                ),
+
+                // 🔲 IMAGE-ONLY CHECKBOX (WEB SELECTION)
+                if (selectionMode)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Checkbox(
+                      value: task.selected,
+                      onChanged: (val) {
+                        setState(() {
+                          task.selected = val ?? false;
+                        });
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const SizedBox(width: 14),
+
+          // 📋 RIGHT – CONTENT (65%)
+          Expanded(
+            flex: 65,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 🔝 TITLE ROW
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        task.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: textMain,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+
+                    _webMoreActions(task),
+                  ],
+                ),
+
+                const SizedBox(height: 4),
+                Text(
+                  "UIN: ${task.uin}",
+                  style: TextStyle(color: textMuted, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "Type: ${task.type}",
+                  style: TextStyle(color: textMuted, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "Assigned: ${task.assignedUser}",
+                  style: TextStyle(color: textMuted, fontSize: 12),
+                ),
+
+                const Spacer(),
+
+                _status(task.status, isWeb: true),
+
+                if (defect)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      "⚠ Defective data",
+                      style: TextStyle(color: Colors.red, fontSize: 11),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _bulkDelete() async {
+    final selected = tasks.where((t) => t.selected).toList();
+    if (selected.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete selected"),
+        content: Text("Delete ${selected.length} scheduler(s)?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              "Delete",
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      tasks.removeWhere((t) => t.selected);
+      filtered.removeWhere((t) => t.selected);
+      selectionMode = false;
+    });
+
+    Fluttertoast.showToast(msg: "Selected schedulers deleted");
+  }
+
+  void _bulkChangeStatus(String status) {
+    final selected = tasks.where((t) => t.selected).toList();
+    if (selected.isEmpty) return;
+
+    setState(() {
+      for (var t in selected) {
+        t.status = status;
+      }
+      selectionMode = false;
+    });
+
+    Fluttertoast.showToast(msg: "Status changed to $status");
+  }
+
+
+
+  Widget _webMoreActions(Task task) {
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.more_vert, color: textMuted),
+      onSelected: (value) {
+        switch (value) {
+          case 'view':
+            _viewTask(task);
+            break;
+          case 'edit':
+            _editTask(task);
+            break;
+          case 'status':
+            _changeStatus(task);
+            break;
+          case 'delete':
+            _deleteTask(task);
+            break;
+        }
+      },
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: 'view', child: Text("View")),
+        PopupMenuItem(value: 'edit', child: Text("Edit")),
+        PopupMenuItem(value: 'status', child: Text("Change Status")),
+        PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'delete',
+          child: Text("Delete", style: TextStyle(color: Colors.red)),
+        ),
+      ],
+    );
+  }
+
+
 
   void _openFilter() {
     showDialog(
@@ -557,57 +1171,57 @@ class _TaskListPageState extends State<TaskListPage> {
                 ),
                 ElevatedButton(
                   child: const Text("Save"),
-            onPressed: () async {
-            if (nameCtrl.text.isEmpty || uinCtrl.text.isEmpty) {
-            Fluttertoast.showToast(msg: "Asset name & UIN are required");
-            return;
-            }
+                  onPressed: () async {
+                    if (nameCtrl.text.isEmpty || uinCtrl.text.isEmpty) {
+                      Fluttertoast.showToast(msg: "Asset name & UIN are required");
+                      return;
+                    }
 
-            Navigator.of(dialogContext).pop();
+                    Navigator.of(dialogContext).pop();
 
-            if (isDemoMode) {
-            // 🧪 DEMO ADD
-            final newTask = Task(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            name: nameCtrl.text,
-            uin: uinCtrl.text,
-            type: "Demo",
-            scheduledDate: selectedDate,
-            assignedUser: "Demo User",
-            imageUrl: "https://picsum.photos/200?demo",
-            status: "Pending",
-            );
+                    if (isDemoMode) {
+                      // 🧪 DEMO ADD
+                      final newTask = Task(
+                        id: DateTime.now().millisecondsSinceEpoch.toString(),
+                        name: nameCtrl.text,
+                        uin: uinCtrl.text,
+                        type: "Demo",
+                        scheduledDate: selectedDate,
+                        assignedUser: "Demo User",
+                        imageUrl: "https://picsum.photos/200?demo",
+                        status: "Pending",
+                      );
 
-            setState(() {
-            tasks.insert(0, newTask);
-            filtered.insert(0, newTask);
-            });
+                      setState(() {
+                        tasks.insert(0, newTask);
+                        filtered.insert(0, newTask);
+                      });
 
-            Fluttertoast.showToast(msg: "Scheduler added (Demo)");
-            } else {
-            // 🌐 REAL API ADD
-            final res = await _api.makePostRequest(
-            "https://uatapi.arresto.in/api/client/1825/tasks",
-            jsonEncode({
-            "meta_data": {
-            "component_name": nameCtrl.text,
-            },
-            "field_value": uinCtrl.text,
-            "schedule_date": selectedDate.toIso8601String(),
-            }),
-            );
+                      Fluttertoast.showToast(msg: "Scheduler added (Demo)");
+                    } else {
+                      // 🌐 REAL API ADD
+                      final res = await _api.makePostRequest(
+                        "https://uatapi.arresto.in/api/client/1825/tasks",
+                        jsonEncode({
+                          "meta_data": {
+                            "component_name": nameCtrl.text,
+                          },
+                          "field_value": uinCtrl.text,
+                          "schedule_date": selectedDate.toIso8601String(),
+                        }),
+                      );
 
-            final decoded = jsonDecode(res.body);
-            final newTask = Task.fromJson(decoded['data']);
+                      final decoded = jsonDecode(res.body);
+                      final newTask = Task.fromJson(decoded['data']);
 
-            setState(() {
-            tasks.insert(0, newTask);
-            filtered.insert(0, newTask);
-            });
+                      setState(() {
+                        tasks.insert(0, newTask);
+                        filtered.insert(0, newTask);
+                      });
 
-            Fluttertoast.showToast(msg: "Scheduler added");
-            }
-            },
+                      Fluttertoast.showToast(msg: "Scheduler added");
+                    }
+                  },
                 ),
               ],
             );
@@ -833,156 +1447,132 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
 
-  /// ===================== TABLE HEADER =====================
-
-  /// ===================== WEB ROW =====================
-  Widget _webRow(Task task) {
-    return InkWell(
-      onLongPress: kIsWeb ? null : () {
-        setState(() {
-          selectionMode = true;
-          task.selected = true;
-        });
-      },
-
-      onTap: () {
-        if (selectionMode) {
-          setState(() {
-            task.selected = !task.selected;
-            if (!hasSelection) selectionMode = false;
-          });
-        } else {
-          _viewTask(task);
-        }
-      },
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: surface,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          children: [
-            // 🖼 IMAGE + CHECKBOX OVERLAY
-            Stack(
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: border),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      task.imageUrl,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-
-                // ✅ Checkbox (web-style overlay)
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  child: AnimatedOpacity(
-                    opacity: selectionMode ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Checkbox(
-                        value: task.selected,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        onChanged: (val) {
-                          setState(() {
-                            selectionMode = true;   // ⭐ ENTER SELECTION MODE
-                            task.selected = val ?? false;
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-
-            const SizedBox(width: 16),
-
-// ✅ NEW CLEAN CARD CONTENT
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 🏷 Asset Name
-                  Text(
-                    task.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: textMain,
-                    ),
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // 🔢 UIN
-                  Text(
-                    "UIN: ${task.uin}",
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: textMuted,
-                    ),
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // 🧩 TYPE
-                  Text(
-                    "Type: ${task.type}",
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: textMuted,
-                    ),
-                  ),
-                ],
+  Widget _inlineDetail(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              "$label:",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: textMuted,
               ),
             ),
-
-            _status(task.status, isWeb: true),
-            const SizedBox(width: 12),
-            _actions(task),
-          ],
-        ),
+          ),
+          Expanded(
+            child: Text(
+              value.isEmpty ? "-" : value,
+              style: TextStyle(
+                fontSize: 11,
+                color: textMain,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
 
+  /// ===================== WEB ROW =====================
 
+  Widget _moreActions(Task task) {
+    return PopupMenuButton<String>(
+      icon: Icon(
+        Icons.more_vert,
+        color: border, // 🔥 same as dropdown underline
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      onSelected: (value) async {
+        switch (value) {
+          case 'status':
+            _changeStatus(task);
+            break;
+
+          case 'view':
+            _viewTask(task); // optional, if you still want it
+            break;
+
+          case 'edit':
+            _editTask(task);
+            break;
+
+          case 'delete':
+            _deleteTask(task);
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'status',
+          child: Row(
+            children: [
+              Icon(Icons.sync, size: 18),
+              SizedBox(width: 8),
+              Text("Change Status"),
+            ],
+          ),
+        ),
+
+        const PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(Icons.edit_outlined, size: 18),
+              SizedBox(width: 8),
+              Text("Edit"),
+            ],
+          ),
+        ),
+
+        const PopupMenuItem(
+          value: 'view',
+          child: Row(
+            children: [
+              Icon(Icons.visibility_outlined, size: 18),
+              SizedBox(width: 8),
+              Text("View"),
+            ],
+          ),
+        ),
+
+        const PopupMenuDivider(),
+
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: const [
+              Icon(Icons.delete_outline, size: 18, color: Colors.red),
+              SizedBox(width: 8),
+              Text(
+                "Delete",
+                style: TextStyle(color: Colors.red),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
   /// ===================== MOBILE ROW =====================
   Widget _mobileRow(Task task) {
     return Dismissible(
       key: ValueKey(task.id),
-
-      // 👉 LEFT = APPROVE, RIGHT = DELETE
       direction: DismissDirection.horizontal,
 
       // 🟢 Swipe RIGHT → APPROVE
       background: Container(
-        alignment: Alignment.centerLeft,
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         padding: const EdgeInsets.only(left: 20),
+        alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
           color: Colors.green.shade600,
           borderRadius: BorderRadius.circular(16),
@@ -992,8 +1582,9 @@ class _TaskListPageState extends State<TaskListPage> {
 
       // 🔴 Swipe LEFT → DELETE
       secondaryBackground: Container(
-        alignment: Alignment.centerRight,
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         padding: const EdgeInsets.only(right: 20),
+        alignment: Alignment.centerRight,
         decoration: BoxDecoration(
           color: Colors.red.shade600,
           borderRadius: BorderRadius.circular(16),
@@ -1001,14 +1592,11 @@ class _TaskListPageState extends State<TaskListPage> {
         child: const Icon(Icons.delete, color: Colors.white, size: 28),
       ),
 
-      // ❗ Decide what happens
       confirmDismiss: (direction) async {
         if (direction == DismissDirection.startToEnd) {
-          // ✅ APPROVE
+          // ✅ APPROVE (don’t remove card)
           if (task.status != "Approved") {
-            setState(() {
-              task.status = "Approved";
-            });
+            setState(() => task.status = "Approved");
 
             if (!isDemoMode) {
               await _api.makePutRequest(
@@ -1019,11 +1607,10 @@ class _TaskListPageState extends State<TaskListPage> {
 
             Fluttertoast.showToast(msg: "Task approved");
           }
-          return false; // ❌ Don't remove card
+          return false;
         }
 
         if (direction == DismissDirection.endToStart) {
-          // ❌ DELETE CONFIRMATION
           return await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
@@ -1045,17 +1632,14 @@ class _TaskListPageState extends State<TaskListPage> {
             ),
           );
         }
-
         return false;
       },
 
-      // 🗑 FINAL DELETE
       onDismissed: (_) {
         setState(() {
           tasks.remove(task);
           filtered.remove(task);
         });
-
         Fluttertoast.showToast(msg: "Task deleted");
       },
 
@@ -1070,62 +1654,63 @@ class _TaskListPageState extends State<TaskListPage> {
           if (selectionMode) {
             setState(() {
               task.selected = !task.selected;
-              if (!hasSelection) selectionMode = false;
             });
-          } else {
-            _viewTask(task);
           }
         },
 
-        // 👇 YOUR EXISTING CARD UI (UNCHANGED)
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: surface,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Stack(
-                    children: [
-                      Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: border),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(task.imageUrl, fit: BoxFit.cover),
-                        ),
-                      ),
+        child: Stack(
+          children: [
+            /// MAIN CARD
+            Container(
+              height: 180,
+              margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(16),
+              ),
 
-                      if (selectionMode)
-                        Positioned(
-                          top: 4,
-                          left: 4,
-                          child: Checkbox(
-                            value: task.selected,
-                            visualDensity: VisualDensity.compact,
-                            onChanged: (val) {
-                              setState(() {
-                                selectionMode = true;
-                                task.selected = val ?? false;
-                              });
-                            },
+              child: Row(
+                children: [
+                  /// 🖼 IMAGE – 35%
+                  Expanded(
+                    flex: 35,
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.network(
+                            task.imageUrl,
+                            width: double.infinity,
+                            height: double.infinity,
+                            fit: BoxFit.cover,
                           ),
                         ),
-                    ],
+
+                        if (selectionMode)
+                          Positioned(
+                            top: 6,
+                            left: 6,
+                            child: Checkbox(
+                              value: task.selected,
+                              visualDensity: VisualDensity.compact,
+                              onChanged: (val) {
+                                setState(() {
+                                  selectionMode = true;
+                                  task.selected = val ?? false;
+                                });
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
 
                   const SizedBox(width: 12),
 
+                  /// 📋 CONTENT – 65%
                   Expanded(
+                    flex: 65,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1134,71 +1719,52 @@ class _TaskListPageState extends State<TaskListPage> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 14.5,
+                            fontSize: 15,
                             fontWeight: FontWeight.w600,
                             color: textMain,
                           ),
                         ),
+
                         const SizedBox(height: 4),
                         Text(
                           "UIN: ${task.uin}",
                           style: TextStyle(fontSize: 12, color: textMuted),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "Type: ${task.type}",
-                          style: TextStyle(fontSize: 12, color: textMuted),
+
+                        const SizedBox(height: 6),
+
+                        _inlineDetail("Type", task.type),
+                        _inlineDetail("Status", task.status),
+                        _inlineDetail("Assigned", task.assignedUser),
+                        _inlineDetail(
+                          "Due",
+                          task.scheduledDate.toString().split(' ')[0],
                         ),
+
+                        const Spacer(),
+
+                        _status(task.status, isWeb: false),
                       ],
                     ),
                   ),
                 ],
               ),
+            ),
 
-              const SizedBox(height: 12),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _status(task.status, isWeb: false),
-                  _actions(task),
-                ],
-              ),
-            ],
-          ),
+            /// 🔥 TOP-RIGHT 3 DOT MENU
+            Positioned(
+              top: 10,
+              right: 10,
+              child: _moreActions(task),
+            ),
+          ],
         ),
       ),
     );
   }
 
-
-
   /// ===================== HELPERS =====================
-  Widget _image(String url, {double size = 48}) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: border),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Image.network(url, fit: BoxFit.cover),
-      ),
-    );
-  }
 
-  Widget _cell(String text, int flex) {
-    return Expanded(
-      flex: flex,
-      child: Text(
-        text,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 14, color: textMain),
-      ),
-    );
-  }
 
   Widget _status(String status, {required bool isWeb}) {
     // ❌ hide "Pending" text label on WEB
@@ -1229,72 +1795,7 @@ class _TaskListPageState extends State<TaskListPage> {
     );
   }
 
-
-
   /// ===================== ACTIONS =====================
-  IconData _statusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case "approved":
-        return Icons.check_circle;
-      case "rejected":
-        return Icons.cancel;
-      case "pending":
-      default:
-        return Icons.hourglass_bottom;
-    }
-  }
-
-  Color _statusColor(String status) {
-    switch (status.toLowerCase()) {
-      case "approved":
-        return Colors.green;
-      case "rejected":
-        return Colors.red;
-      case "pending":
-      default:
-        return Colors.orange;
-    }
-  }
-
-  Widget _actions(Task task) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 🔁 STATUS ICON (dynamic)
-        Tooltip(
-          message: "Change status",
-          child: IconButton(
-            icon: Icon(_statusIcon(task.status)),
-            color: _statusColor(task.status),
-            onPressed: task.status == "Approved"
-                ? null // ❌ disable when approved
-                : () => _changeStatus(task),
-          ),
-        ),
-
-        // 👁 View
-        IconButton(
-          icon: const Icon(Icons.visibility_outlined),
-          color: Colors.blue,
-          onPressed: () => _viewTask(task),
-        ),
-
-        // ✏️ Edit
-        IconButton(
-          icon: const Icon(Icons.edit_outlined),
-          color: Colors.green,
-          onPressed: () => _editTask(task),
-        ),
-
-        // 🗑 Delete
-        IconButton(
-          icon: const Icon(Icons.delete_outline),
-          color: Colors.red,
-          onPressed: () => _deleteTask(task),
-        ),
-      ],
-    );
-  }
 
 }
 
@@ -1333,3 +1834,123 @@ List<Task> mockTasks() {
     ),
   ];
 }
+
+class _InlineSideBar extends StatelessWidget {
+  final bool collapsed;
+  final VoidCallback onAddScheduler;
+  final VoidCallback onExportPdf;
+
+  const _InlineSideBar({
+    required this.collapsed,
+    required this.onAddScheduler,
+    required this.onExportPdf,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: collapsed ? 72 : 240,
+      decoration: BoxDecoration(
+        color: surface,
+        border: Border(right: BorderSide(color: border)),
+      ),
+      child: Column(
+        children: [
+          /// 🔹 TOP SPACER
+          const SizedBox(height: 20),
+
+          /// 🔹 CENTERED MENU
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _menuItem(Icons.dashboard_outlined, "Dashboard"),
+                  _menuItem(Icons.schedule_outlined, "Schedulers"),
+                  _menuItem(Icons.inventory_2_outlined, "Assets"),
+                  _menuItem(Icons.analytics_outlined, "Reports"),
+                  _menuItem(Icons.settings_outlined, "Settings"),
+                ],
+              ),
+            ),
+          ),
+
+          /// 🔹 BOTTOM ACTIONS
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              children: [
+                Divider(color: border),
+                _menuItem(
+                  Icons.add_circle_outline,
+                  "Add Scheduler",
+                  onTap: onAddScheduler,
+                ),
+                _menuItem(
+                  Icons.picture_as_pdf_outlined,
+                  "Export PDF",
+                  onTap: onExportPdf,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 🧠 SINGLE MENU ITEM (PILL STYLE)
+  Widget _menuItem(
+      IconData icon,
+      String label, {
+        VoidCallback? onTap,
+      }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: collapsed ? 0 : 18,
+            vertical: 12,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisAlignment:
+            collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+            children: [
+              Icon(icon, size: 22, color: textMain),
+              if (!collapsed) ...[
+                const SizedBox(width: 14),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: textMain,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
