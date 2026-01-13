@@ -202,49 +202,7 @@ class _TaskListPageState extends State<TaskListPage> {
     _loadTasks();
   }
 
-  void _viewTask(Task task) {
-    showDialog(
-      context: context,
-      useRootNavigator: true,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text("Task Details"),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _detailRow("Asset Name", task.name),
-                _detailRow("UIN", task.uin),
-                _detailRow("Type", task.type),
-                _detailRow("Status", task.status),
 
-                Divider(
-                  color: border,
-                  thickness: 0.8,
-                ),
-
-                _detailRow("Assigned To", task.assignedUser),
-                _detailRow("Created On",
-                    task.scheduledDate.toString().split(' ')[0]),
-
-                _detailRow("Due Date",
-                    task.scheduledDate.toString().split(' ')[0]),
-
-                _detailRow("Task ID", task.id),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text("Close"),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   Widget _detailRow(String label, String value) {
     return Padding(
@@ -273,7 +231,67 @@ class _TaskListPageState extends State<TaskListPage> {
     );
   }
 
+  Future<void> _viewTask(Task task) async {
+    await showDialog(
+      context: context, // ❌ DO NOT useRootNavigator here
+      builder: (dialogContext) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            dialogBackgroundColor: surface,
+            colorScheme: ColorScheme.light(
+              primary: accent,       // 🔥 title + buttons
+              onPrimary: Colors.white,
+              surface: surface,
+              onSurface: textMain,
+            ),
+          ),
+          child: AlertDialog(
+            title: Text(
+              "Task Details",
+              style: TextStyle(
+                color: accent,        // 🔥 title color
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _detailRow("Asset Name", task.name),
+                  _detailRow("UIN", task.uin),
+                  _detailRow("Type", task.type),
+                  _detailRow("Status", task.status),
 
+                  Divider(color: border),
+
+                  _detailRow("Assigned To", task.assignedUser),
+                  _detailRow(
+                    "Created On",
+                    task.scheduledDate.toString().split(' ')[0],
+                  ),
+                  _detailRow(
+                    "Due Date",
+                    task.scheduledDate.toString().split(' ')[0],
+                  ),
+                  _detailRow("Task ID", task.id),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: Text(
+                  "Close",
+                  style: TextStyle(color: accent), // 🔥 button color
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> _editTask(Task task) async {
     final picked = await showDatePicker(
@@ -281,14 +299,27 @@ class _TaskListPageState extends State<TaskListPage> {
       initialDate: task.scheduledDate,
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: accent,          // 🔥 header + selected date
+              onPrimary: Colors.white,
+              surface: surface,         // calendar bg
+              onSurface: textMain,      // text color
+            ),
+            dialogBackgroundColor: surface,
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (picked != null) {
       setState(() => task.scheduledDate = picked);
 
       await _api.makePutRequest(
-        "https://uatapi.arresto.in/api/client/1825/tasks/${task
-            .id}/reschedule",
+        "https://uatapi.arresto.in/api/client/1825/tasks/${task.id}/reschedule",
         jsonEncode({"scheduled_date": picked.toIso8601String()}),
       );
 
@@ -299,29 +330,36 @@ class _TaskListPageState extends State<TaskListPage> {
   Future<void> _deleteTask(Task task) async {
     final confirm = await showDialog<bool>(
       context: context,
-      useRootNavigator: true, // ✅ IMPORTANT
+      useRootNavigator: true,
       barrierDismissible: true,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text("Delete Task"),
+          backgroundColor: surface,
+          title: Text(
+            "Delete Task",
+            style: TextStyle(
+              color: accent,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           content: const Text(
             "Are you sure you want to delete this task?",
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false); // ✅ close dialog only
-              },
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true); // ✅ confirm delete
-              },
-              child: const Text(
-                "Delete",
-                style: TextStyle(color: Colors.red),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                "Cancel",
+                style: TextStyle(color: textMuted),
               ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: danger,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text("Delete"),
             ),
           ],
         );
@@ -346,32 +384,38 @@ class _TaskListPageState extends State<TaskListPage> {
     }
   }
 
-
   Future<void> _changeStatus(Task task) async {
     showDialog(
       context: context,
       useRootNavigator: true,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text("Change Status"),
+          backgroundColor: surface,
+          title: Text(
+            "Change Status",
+            style: TextStyle(
+              color: accent,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               _statusOption(
                 label: "Pending",
-                color: Colors.orange,
+                color: warning,
                 task: task,
                 dialogContext: dialogContext,
               ),
               _statusOption(
                 label: "Approved",
-                color: Colors.green,
+                color: success,
                 task: task,
                 dialogContext: dialogContext,
               ),
               _statusOption(
                 label: "Rejected",
-                color: Colors.red,
+                color: danger,
                 task: task,
                 dialogContext: dialogContext,
               ),
@@ -381,6 +425,9 @@ class _TaskListPageState extends State<TaskListPage> {
       },
     );
   }
+
+
+
   Widget _statusOption({
     required String label,
     required Color color,
@@ -1562,6 +1609,53 @@ class _TaskListPageState extends State<TaskListPage> {
             ),
           ),
 
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeInOutCubic,
+
+            // 👇 THIS is the magic
+            right: showActions
+                ? actionWidth - 22 // moves WITH the panel
+                : 10,              // original position near info button
+
+            top: (cardHeight - 36) / 2 + 36, // 👈 below info icon
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  for (final t in tasks) {
+                    t.panel = CardPanel.none;
+                  }
+                  task.panel =
+                  showActions ? CardPanel.none : CardPanel.actions;
+                });
+              },
+              child: Container(
+                height: 36,
+                width: 36,
+                decoration: BoxDecoration(
+                  color: surface,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: AnimatedRotation(
+                  duration: const Duration(milliseconds: 300),
+                  turns: showActions ? 0.5 : 0.0, // ⬅️ rotates on open
+                  child: Icon(
+                    Icons.chevron_left,
+                    color: showActions ? accent : Colors.black54,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+
           // ================= PAPER STRIP =================
           Positioned(
             right: 10,
@@ -2616,15 +2710,7 @@ class _ActionsOverlayCard extends StatelessWidget {
           const SizedBox(height: 10),
 
           /// ❌ CLOSE BUTTON (TOP)
-          Align(
-            alignment: Alignment.topLeft,
-            child: IconButton(
-              icon: const Icon(Icons.close, size: 16),
-              padding: const EdgeInsets.only(left: 10),
-              constraints: const BoxConstraints(),
-              onPressed: onClose,
-            ),
-          ),
+
 
           const SizedBox(height: 6),
 
