@@ -1226,8 +1226,8 @@ class _TaskListPageState extends State<TaskListPage> {
                   final box =
                   btnContext.findRenderObject() as RenderBox;
                   (
-                    context: context,
-                    anchor: box,
+                  context: context,
+                  anchor: box,
                   );
                 },
               );
@@ -1464,7 +1464,7 @@ class _TaskListPageState extends State<TaskListPage> {
     final bool showActions = task.panel == CardPanel.actions;
     final bool showOverlay = showInfo || showActions;
 
-    final double actionWidth = width * 0.28; // 👈 1/4th tray
+    final double actionWidth = width * 0.20; // 👈 1/4th tray
 
     return SizedBox(
       width: width,
@@ -1551,6 +1551,7 @@ class _TaskListPageState extends State<TaskListPage> {
                   onClose: () =>
                       setState(() => task.panel = CardPanel.none),
                   actions: _ActionPanelContent(
+                    active: showActions, //
                     onView: () => _viewTask(task),
                     onEdit: () => _editTask(task),
                     onChangeStatus: () => _changeStatus(task),
@@ -1565,51 +1566,57 @@ class _TaskListPageState extends State<TaskListPage> {
           Positioned(
             right: 10,
             top: (cardHeight - 72) / 2,
-            child: Container(
-              width: 44,
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              decoration: BoxDecoration(
-                color: surface,
-                borderRadius: BorderRadius.circular(22),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.18),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity: showOverlay ? 0 : 1, // hide when panel open
+              child: IgnorePointer(
+                ignoring: showOverlay,
+                child: Container(
+                  width: 44,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: surface,
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  _paperStripIcon(
-                    icon: Icons.info_outline,
-                    active: showInfo,
-                    onTap: () {
-                      setState(() {
-                        for (final t in tasks) {
-                          t.panel = CardPanel.none;
-                        }
-                        task.panel =
-                        showInfo ? CardPanel.none : CardPanel.info;
-                      });
-                    },
+                  child: Column(
+                    children: [
+                      _paperStripIcon(
+                        icon: Icons.info_outline,
+                        active: showInfo,
+                        onTap: () {
+                          setState(() {
+                            for (final t in tasks) {
+                              t.panel = CardPanel.none;
+                            }
+                            task.panel =
+                            showInfo ? CardPanel.none : CardPanel.info;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      _paperStripIcon(
+                        icon: Icons.chevron_left,
+                        active: showActions,
+                        onTap: () {
+                          setState(() {
+                            for (final t in tasks) {
+                              t.panel = CardPanel.none;
+                            }
+                            task.panel =
+                            showActions ? CardPanel.none : CardPanel.actions;
+                          });
+                        },
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
-                  _paperStripIcon(
-                    icon: Icons.chevron_left,
-                    active: showActions,
-                    onTap: () {
-                      setState(() {
-                        for (final t in tasks) {
-                          t.panel = CardPanel.none;
-                        }
-                        task.panel = showActions
-                            ? CardPanel.none
-                            : CardPanel.actions;
-                      });
-                    },
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -2585,47 +2592,7 @@ class _InlineSideBar extends StatelessWidget {
   }
 
   /// 🧠 SINGLE MENU ITEM (PILL STYLE)
-  Widget _menuItem(
-      IconData icon,
-      String label, {
-        VoidCallback? onTap,
-      }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: collapsed ? 0 : 14,
-            vertical: 10,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.25),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisAlignment:
-            collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-            children: [
-              Icon(icon, size: 22, color: textMain),
-              if (!collapsed) ...[
-                const SizedBox(width: 14),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: textMain,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+
 }
 class _ActionsOverlayCard extends StatelessWidget {
   final VoidCallback onClose;
@@ -2645,15 +2612,31 @@ class _ActionsOverlayCard extends StatelessWidget {
         border: Border.all(color: border),
       ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          IconButton(
-            icon: const Icon(Icons.close, size: 16),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            onPressed: onClose,
+          const SizedBox(height: 10),
+
+          /// ❌ CLOSE BUTTON (TOP)
+          Align(
+            alignment: Alignment.topLeft,
+            child: IconButton(
+              icon: const Icon(Icons.close, size: 16),
+              padding: const EdgeInsets.only(left: 10),
+              constraints: const BoxConstraints(),
+              onPressed: onClose,
+            ),
           ),
-          actions,
+
+          const SizedBox(height: 6),
+
+          /// ✅ ACTIONS WITH PROPER LEFT/RIGHT MARGIN
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Center(child: actions),
+            ),
+          ),
+
+          const SizedBox(height: 10),
         ],
       ),
     );
@@ -2981,17 +2964,20 @@ class _InfoOverlayCard extends StatelessWidget {
   }
 }
 class _ActionPanelContent extends StatelessWidget {
+  final bool active; // 👈 add this
   final VoidCallback onView;
   final VoidCallback onEdit;
   final VoidCallback onChangeStatus;
   final VoidCallback onDelete;
 
   const _ActionPanelContent({
+    required this.active,
     required this.onView,
     required this.onEdit,
     required this.onChangeStatus,
     required this.onDelete,
   });
+
 
   @override
   Widget build(BuildContext context) {
@@ -3008,26 +2994,32 @@ class _ActionPanelContent extends StatelessWidget {
       ],
     );
   }
-
   Widget _icon(
       IconData icon,
       VoidCallback onTap, {
         Color? color,
       }) {
+    final bool isActive = active;
+
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        height: 28,
-        width: 28,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 32,
+        width: 32,
         decoration: BoxDecoration(
-          color: const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(8),
+          color: isActive
+              ? (color ?? accent) // ✅ STAYS COLORED
+              : const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
           icon,
-          size: 14,
-          color: color ?? const Color(0xFF444444),
+          size: 16,
+          color: isActive
+              ? Colors.white
+              : (color ?? Colors.black54),
         ),
       ),
     );
@@ -3086,21 +3078,3 @@ class _MobileActionsColumn extends StatelessWidget {
     );
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
