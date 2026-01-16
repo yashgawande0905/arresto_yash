@@ -10,29 +10,27 @@ import 'package:arresto/app_utility/app_colors.dart';
 import 'package:flutter/services.dart';
 
 
-// ===================== COLOR ROLES =====================
+// ===================== COLOR ROLES (FROM AppColors) =====================
 
 // Brand
-final Color accent = AppColors.app_header_new_color; // orange
+final Color accent = AppColors.app_header_new_color;
 
 // Surfaces
-final Color pageBg  = const Color(0xFFF5F6F8); // light grey (NOT white)
-final Color surface = Colors.white;            // cards
+final Color pageBg  = AppColors.light_grey_color;
+final Color surface = AppColors.white;
 
 // Structure
-final Color border = const Color(0xFFE0E0E0);
+final Color border = AppColors.light_grey;
 
 // Text
-final Color textMain  = const Color(0xFF2E2E2E);
-final Color textMuted = const Color(0xFF7A7A7A);
-
-// Sidebar
-final Color sidebarBg = const Color(0xFFF9F4EA); // very soft warm tint
+final Color textMain  = AppColors.app_text_color;
+final Color textMuted = AppColors.disable;
 
 // Status
-final Color success = const Color(0xFF2E7D32); // deep green
-final Color warning = const Color(0xFFF9A825); // amber
-final Color danger  = const Color(0xFFC62828); // deep red
+final Color success = AppColors.approved_green;
+final Color warning = AppColors.pending_yellow;
+final Color danger  = AppColors.reject_red;
+
 
 
 enum CardPanel { none, info, actions }
@@ -51,6 +49,8 @@ class Task {
   bool isActive;
   bool enableWebHero = true; // 🔥 toggle anytime
   late final String heroTag;
+  bool expanded = false;
+
 
   // 👇 SINGLE SOURCE OF TRUTH
   CardPanel panel;
@@ -114,8 +114,11 @@ class TaskListPage extends StatefulWidget {
 class _TaskListPageState extends State<TaskListPage> {
   final ApisRequests _api = ApisRequests();
   final ScrollController _listCtrl = ScrollController();
+
   int get selectedCount =>
-      filtered.where((t) => t.selected).length;
+      filtered
+          .where((t) => t.selected)
+          .length;
 
   // ===== SIDEBAR FILTER STATE =====
   Set<String> statusFilter = {};
@@ -131,6 +134,7 @@ class _TaskListPageState extends State<TaskListPage> {
   bool sidebarCollapsed = false;
 
   bool isDemoMode = true;
+
 // 🔥 true = dummy cards
 // 🔥 false = real API
 
@@ -149,12 +153,13 @@ class _TaskListPageState extends State<TaskListPage> {
   bool selectionMode = false;
 
 
-
   bool get isAllSelected =>
       filtered.isNotEmpty && filtered.every((t) => t.selected);
 
   bool get isPartiallySelected {
-    final selectedCount = filtered.where((t) => t.selected).length;
+    final selectedCount = filtered
+        .where((t) => t.selected)
+        .length;
     return selectedCount > 0 && selectedCount < filtered.length;
   }
 
@@ -195,13 +200,11 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
   @override
   void initState() {
     super.initState();
     _loadTasks();
   }
-
 
 
   Widget _detailRow(String label, String value) {
@@ -239,7 +242,7 @@ class _TaskListPageState extends State<TaskListPage> {
           data: Theme.of(context).copyWith(
             dialogBackgroundColor: surface,
             colorScheme: ColorScheme.light(
-              primary: accent,       // 🔥 title + buttons
+              primary: accent, // 🔥 title + buttons
               onPrimary: Colors.white,
               surface: surface,
               onSurface: textMain,
@@ -249,7 +252,7 @@ class _TaskListPageState extends State<TaskListPage> {
             title: Text(
               "Task Details",
               style: TextStyle(
-                color: accent,        // 🔥 title color
+                color: accent, // 🔥 title color
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -303,10 +306,10 @@ class _TaskListPageState extends State<TaskListPage> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: ColorScheme.light(
-              primary: accent,          // 🔥 header + selected date
+              primary: accent, // 🔥 header + selected date
               onPrimary: Colors.white,
-              surface: surface,         // calendar bg
-              onSurface: textMain,      // text color
+              surface: surface, // calendar bg
+              onSurface: textMain, // text color
             ),
             dialogBackgroundColor: surface,
           ),
@@ -427,7 +430,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
   Widget _statusOption({
     required String label,
     required Color color,
@@ -502,7 +504,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
   void _searchTask(String value) {
     setState(() {
       filtered = tasks.where((t) {
@@ -536,13 +537,14 @@ class _TaskListPageState extends State<TaskListPage> {
               pw.SizedBox(height: 12),
 
               ...filtered.map(
-                    (task) => pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 6),
-                  child: pw.Text(
-                    "${task.name} | ${task.uin} | ${task.status}",
-                    style: const pw.TextStyle(fontSize: 12),
-                  ),
-                ),
+                    (task) =>
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.only(bottom: 6),
+                      child: pw.Text(
+                        "${task.name} | ${task.uin} | ${task.status}",
+                        style: const pw.TextStyle(fontSize: 12),
+                      ),
+                    ),
               ),
             ],
           );
@@ -562,21 +564,19 @@ class _TaskListPageState extends State<TaskListPage> {
 
     return Scaffold(
       backgroundColor: pageBg,
-      appBar: isWeb
-          ? null
-          : AppBar(
-        backgroundColor: surface,
-        elevation: 0,
-        iconTheme: IconThemeData(color: textMain),
-        titleTextStyle: TextStyle(
-          color: textMain,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
+      body: isWeb
+          ? _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: _webGrid(context), // ✅ cards only
         ),
-      ),
-      body: isWeb ? _webBody(context) : _mobileBody(),
+      )
+          : _mobileBody(), // ✅ mobile cards only
     );
   }
+
 
   Widget _swipeBg({
     required Color color,
@@ -596,22 +596,15 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
   Widget _mobileBody() {
-    return Column(
-      children: [
-        _topBar(),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : ListView.builder(
-            controller: _listCtrl,
-            padding: const EdgeInsets.only(top: 8),
-            itemCount: filtered.length,
-            itemBuilder: (_, i) => _mobileRow(filtered[i]),
-          ),
-        ),
-      ],
+    return _loading
+        ? const Center(child: CircularProgressIndicator())
+        : ListView.builder(
+      padding: const EdgeInsets.only(top: 12),
+      itemCount: filtered.length,
+      itemBuilder: (_, i) => _mobileRow(filtered[i]),
     );
   }
+
 
   void _applyFilters() {
     setState(() {
@@ -703,6 +696,7 @@ class _TaskListPageState extends State<TaskListPage> {
         ),
         child: Row(
           children: [
+
             /// LABEL
             SizedBox(
               width: 46,
@@ -754,7 +748,6 @@ class _TaskListPageState extends State<TaskListPage> {
       ),
     );
   }
-
 
 
   Widget _statusItem(String label, Color color) {
@@ -813,7 +806,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
   Widget _filterSection({
     required String title,
     required Widget child,
@@ -848,105 +840,6 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
 
-  Widget _sidebarFilterUI() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _filterSection(
-          title: "STATUS",
-          child: Column(
-            children: [
-              _statusItem("Pending", warning),
-              _statusItem("Approved", success),
-              _statusItem("Rejected", danger),
-            ],
-          ),
-        ),
-
-        _filterSection(
-          title: "TYPE",
-          child: Column(
-            children: tasks
-                .map((t) => t.type)
-                .toSet()
-                .map(_checkType)
-                .toList(),
-          ),
-        ),
-
-        _filterSection(
-          title: "ASSIGNED TO",
-          child: Column(
-            children: tasks
-                .map((t) => t.assignedUser)
-                .toSet()
-                .map(_checkUser)
-                .toList(),
-          ),
-        ),
-
-        _filterSection(
-          title: "DATE",
-          child: Column(
-            children: [
-              _dateTile(label: "Exact", date: exactDateFilter,
-                onPick: (d) {
-                  setState(() {
-                    exactDateFilter = d;
-                    fromDateFilter = null;
-                    toDateFilter = null;
-                    _applyFilters();
-                  });
-                },
-                onClear: () {
-                  setState(() {
-                    exactDateFilter = null;
-                    _applyFilters();
-                  });
-                },
-              ),
-
-              _dateTile(label: "From", date: fromDateFilter,
-                onPick: (d) {
-                  setState(() {
-                    fromDateFilter = d;
-                    exactDateFilter = null;
-                    _applyFilters();
-                  });
-                },
-                onClear: () {
-                  setState(() {
-                    fromDateFilter = null;
-                    _applyFilters();
-                  });
-                },
-              ),
-
-              _dateTile(label: "To", date: toDateFilter,
-                onPick: (d) {
-                  setState(() {
-                    toDateFilter = d;
-                    exactDateFilter = null;
-                    _applyFilters();
-                  });
-                },
-                onClear: () {
-                  setState(() {
-                    toDateFilter = null;
-                    _applyFilters();
-                  });
-                },
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-
-
-
 
   Widget _sectionTitle(String text) {
     return Padding(
@@ -964,30 +857,7 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-  Widget _webBody(BuildContext context) {
-    return Column(
-      children: [
-        _webTopBar(),
-        Expanded(
-          child: Row(
-            children: [
-              _InlineSideBar(
-                collapsed: sidebarCollapsed,
-                onAddScheduler: _addScheduler,
-                onExportPdf: _exportPdf,
-                filterSection: _sidebarFilterUI(),
-              ),
-              Expanded(
-                child: _loading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _webDashboard(context),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+
 
   void _openAdvancedFilter() {
     final TextEditingController uinCtrl = TextEditingController();
@@ -1090,10 +960,14 @@ class _TaskListPageState extends State<TaskListPage> {
                   onPressed: () {
                     setState(() {
                       filtered = tasks.where((t) {
-                        if (uinCtrl.text.isNotEmpty && t.uin != uinCtrl.text) return false;
-                        if (typeCtrl.text.isNotEmpty && t.type != typeCtrl.text) return false;
-                        if (fromDate != null && t.scheduledDate.isBefore(fromDate!)) return false;
-                        if (toDate != null && t.scheduledDate.isAfter(toDate!)) return false;
+                        if (uinCtrl.text.isNotEmpty && t.uin != uinCtrl.text)
+                          return false;
+                        if (typeCtrl.text.isNotEmpty && t.type != typeCtrl.text)
+                          return false;
+                        if (fromDate != null &&
+                            t.scheduledDate.isBefore(fromDate!)) return false;
+                        if (toDate != null && t.scheduledDate.isAfter(toDate!))
+                          return false;
                         return true;
                       }).toList();
                     });
@@ -1141,202 +1015,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
-
-  Widget _webTopBar() {
-    return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: surface,
-        border: Border(bottom: BorderSide(color: border)),
-      ),
-      child: Row(
-        children: [
-          // ☰ MENU + TITLE (ALIGNED WITH SIDEBAR)
-          SizedBox(
-            width: sidebarCollapsed ? 72 : 240,
-            child: Row(
-              children: [
-                Text(
-                  "",
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: textMain,
-                  ),
-                ),
-
-                if (!sidebarCollapsed)
-                  Text(
-                    "Scheduler",
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: textMain,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          const Spacer(),
-
-          // 🔍 SEARCH FIELD (WEB)
-          if (showSearch)
-            SizedBox(
-              width: 260,
-              child: TextField(
-                controller: searchCtrl,
-                autofocus: true,
-                onChanged: _searchTask,
-                decoration: _outlinedInput(
-                  hint: "Search scheduler...",
-                  prefixIcon: Icon(Icons.search, color: textMuted),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () {
-                      setState(() {
-                        showSearch = false;
-                        searchCtrl.clear();
-                        filtered = List.from(tasks);
-                      });
-                    },
-                  ),
-                ),
-              ),
-            ),
-
-          const SizedBox(width: 6),
-          _greySearchBtn(() {
-            setState(() => showSearch = !showSearch);
-          }),
-
-
-
-// ➕ ADD SCHEDULER (ICON ONLY)
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            color: textMain,
-            tooltip: "Add Scheduler",
-            onPressed: _addScheduler,
-          ),
-
-// 📄 EXPORT PDF (ICON ONLY)
-          IconButton(
-            icon: const Icon(Icons.picture_as_pdf_outlined),
-            color: textMain,
-            tooltip: "Export PDF",
-            onPressed: _exportPdf,
-          ),
-
-
-          // ☑️ SELECT ALL (TRI-STATE)
-          Checkbox(
-            tristate: true,
-            value: isAllSelected
-                ? true
-                : isPartiallySelected
-                ? null
-                : false,
-            onChanged: (val) {
-              setState(() {
-                if (val == true) {
-                  selectionMode = true;
-                  for (var t in filtered) {
-                    t.selected = true;
-                  }
-                } else {
-                  selectionMode = false;
-                  for (var t in filtered) {
-                    t.selected = false;
-                  }
-                }
-              });
-            },
-          ),
-
-          // 🗑 DELETE (ONLY WHEN SELECTED)
-          if (hasSelection)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              color: Colors.red,
-              onPressed: _bulkDelete,
-            ),
-
-          // 🔽 FILTER + BULK STATUS
-          Builder(
-            builder: (btnContext) {
-              return IconButton(
-                icon: const Icon(Icons.filter_list),
-                onPressed: () {
-                  final box =
-                  btnContext.findRenderObject() as RenderBox;
-                  (
-                  context: context,
-                  anchor: box,
-                  );
-                },
-              );
-            },
-          ),
-
-          const SizedBox(width: 12),
-
-          const CircleAvatar(
-            radius: 16,
-            backgroundImage: NetworkImage("https://i.pravatar.cc/150"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _webDashboard(BuildContext context) {
-    return Column(
-      children: [
-        // 🔒 FIXED STATS (DO NOT SCROLL)
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: _webStatsRow(),
-        ),
-
-        // 🔽 ONLY CARDS SCROLL
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: _webGrid(context),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _webStatsRow() {
-    return Row(
-      children: [
-        Expanded(child: _stat("Total Schedulers", tasks.length.toString())),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _stat(
-            "Pending",
-            tasks.where((t) => t.status == "Pending").length.toString(),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _stat(
-            "Approved",
-            tasks.where((t) => t.status == "Approved").length.toString(),
-          ),
-        ),
-        const SizedBox(width: 12),
-        _csvCard(),
-      ],
-    );
-  }
-
-
   Widget _stat(String title, String value) {
     return Container(
       height: 100,
@@ -1363,6 +1041,7 @@ class _TaskListPageState extends State<TaskListPage> {
       ),
     );
   }
+
   void _uploadCsv() {
     Fluttertoast.showToast(msg: "CSV upload coming next");
   }
@@ -1418,14 +1097,22 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
   Widget _webGrid(BuildContext context) {
+    const double minCardWidth = 420;
+    const double spacing = 16;
+
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final double usableWidth = screenWidth - 32;
+
+    final int columnCount =
+    (usableWidth / (minCardWidth + spacing)).floor().clamp(1, 4);
+
     final double cardWidth =
-        (MediaQuery.of(context).size.width - 300) / 2;
+        (usableWidth - spacing * (columnCount - 1)) / columnCount;
 
     return Wrap(
-      spacing: 16,
-      runSpacing: 16,
+      spacing: spacing,
+      runSpacing: spacing,
       children: filtered.map((task) {
         return enableWebHero
             ? Hero(
@@ -1444,6 +1131,7 @@ class _TaskListPageState extends State<TaskListPage> {
       }).toList(),
     );
   }
+
 
   TextStyle _cardText({
     double size = 14,
@@ -1538,12 +1226,15 @@ class _TaskListPageState extends State<TaskListPage> {
               children: [
                 Expanded(
                   flex: 35,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Image.network(
-                      task.imageUrl,
-                      fit: BoxFit.cover,
-                      height: double.infinity,
+                  child:GestureDetector(
+                    onTap: () => _openImageViewer(task.imageUrl),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.network(
+                        task.imageUrl,
+                        fit: BoxFit.cover,
+                        height: double.infinity,
+                      ),
                     ),
                   ),
                 ),
@@ -1598,7 +1289,8 @@ class _TaskListPageState extends State<TaskListPage> {
                   onClose: () =>
                       setState(() => task.panel = CardPanel.none),
                   actions: _ActionPanelContent(
-                    active: showActions, //
+                    active: showActions,
+                    //
                     onView: () => _viewTask(task),
                     onEdit: () => _editTask(task),
                     onChangeStatus: () => _changeStatus(task),
@@ -1616,9 +1308,11 @@ class _TaskListPageState extends State<TaskListPage> {
             // 👇 THIS is the magic
             right: showActions
                 ? actionWidth - 22 // moves WITH the panel
-                : 10,              // original position near info button
+                : 10,
+            // original position near info button
 
-            top: (cardHeight - 36) / 2 + 36, // 👈 below info icon
+            top: (cardHeight - 36) / 2 + 36,
+            // 👈 below info icon
             child: GestureDetector(
               onTap: () {
                 setState(() {
@@ -1655,8 +1349,8 @@ class _TaskListPageState extends State<TaskListPage> {
             ),
           ),
 
-
           // ================= PAPER STRIP =================
+
           Positioned(
             right: 10,
             top: (cardHeight - 72) / 2,
@@ -1725,23 +1419,24 @@ class _TaskListPageState extends State<TaskListPage> {
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete selected"),
-        content: Text("Delete ${selected.length} scheduler(s)?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Cancel"),
+      builder: (ctx) =>
+          AlertDialog(
+            title: const Text("Delete selected"),
+            content: Text("Delete ${selected.length} scheduler(s)?"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              "Delete",
-              style: TextStyle(color: Colors.red),
-            ),
-          ),
-        ],
-      ),
     );
 
     if (confirm != true) return;
@@ -1847,45 +1542,47 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
+  Widget _checkStatus(String value) =>
+      _checkTile(
+        label: value,
+        value: statusFilter.contains(value),
+        onTap: () {
+          setState(() {
+            statusFilter.contains(value)
+                ? statusFilter.remove(value)
+                : statusFilter.add(value);
+            _applyFilters();
+          });
+        },
+      );
 
-  Widget _checkStatus(String value) => _checkTile(
-    label: value,
-    value: statusFilter.contains(value),
-    onTap: () {
-      setState(() {
-        statusFilter.contains(value)
-            ? statusFilter.remove(value)
-            : statusFilter.add(value);
-        _applyFilters();
-      });
-    },
-  );
+  Widget _checkType(String value) =>
+      _checkTile(
+        label: value,
+        value: typeFilter.contains(value),
+        onTap: () {
+          setState(() {
+            typeFilter.contains(value)
+                ? typeFilter.remove(value)
+                : typeFilter.add(value);
+            _applyFilters();
+          });
+        },
+      );
 
-  Widget _checkType(String value) => _checkTile(
-    label: value,
-    value: typeFilter.contains(value),
-    onTap: () {
-      setState(() {
-        typeFilter.contains(value)
-            ? typeFilter.remove(value)
-            : typeFilter.add(value);
-        _applyFilters();
-      });
-    },
-  );
-
-  Widget _checkUser(String value) => _checkTile(
-    label: value,
-    value: userFilter.contains(value),
-    onTap: () {
-      setState(() {
-        userFilter.contains(value)
-            ? userFilter.remove(value)
-            : userFilter.add(value);
-        _applyFilters();
-      });
-    },
-  );
+  Widget _checkUser(String value) =>
+      _checkTile(
+        label: value,
+        value: userFilter.contains(value),
+        onTap: () {
+          setState(() {
+            userFilter.contains(value)
+                ? userFilter.remove(value)
+                : userFilter.add(value);
+            _applyFilters();
+          });
+        },
+      );
 
 
   void _addScheduler() {
@@ -1998,8 +1695,12 @@ class _TaskListPageState extends State<TaskListPage> {
                     ),
                   ),
                   onPressed: () async {
-                    if (nameCtrl.text.trim().isEmpty ||
-                        uinCtrl.text.trim().isEmpty) {
+                    if (nameCtrl.text
+                        .trim()
+                        .isEmpty ||
+                        uinCtrl.text
+                            .trim()
+                            .isEmpty) {
                       Fluttertoast.showToast(
                         msg: "Asset name & UIN are required",
                       );
@@ -2010,7 +1711,8 @@ class _TaskListPageState extends State<TaskListPage> {
 
                     if (isDemoMode) {
                       final newTask = Task(
-                        id: DateTime.now()
+                        id: DateTime
+                            .now()
                             .millisecondsSinceEpoch
                             .toString(),
                         name: nameCtrl.text.trim(),
@@ -2069,7 +1771,9 @@ class _TaskListPageState extends State<TaskListPage> {
   /// ===================== TOP BAR =====================
 
   Widget _topBar() {
-    final selectedCount = tasks.where((t) => t.selected).length;
+    final selectedCount = tasks
+        .where((t) => t.selected)
+        .length;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -2079,10 +1783,15 @@ class _TaskListPageState extends State<TaskListPage> {
       ),
       child: Row(
         children: [
+
           /// 🏷 TITLE
           Text(
             selectionMode ? "$selectedCount selected" : "Scheduler",
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            style: Theme
+                .of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(
               color: textMain,
               fontWeight: FontWeight.w600,
             ),
@@ -2191,7 +1900,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
   void _exitSelectionMode() {
     setState(() {
       selectionMode = false;
@@ -2210,25 +1918,26 @@ class _TaskListPageState extends State<TaskListPage> {
     final confirm = await showDialog<bool>(
       context: context,
       useRootNavigator: true,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text("Delete Selected"),
-        content: Text(
-          "Delete ${selectedTasks.length} selected scheduler(s)?",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text(
-              "Delete",
-              style: TextStyle(color: Colors.red),
+      builder: (dialogContext) =>
+          AlertDialog(
+            title: const Text("Delete Selected"),
+            content: Text(
+              "Delete ${selectedTasks.length} selected scheduler(s)?",
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
     );
 
     if (confirm != true) return;
@@ -2250,9 +1959,7 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
-  Widget _iconBtn(
-      IconData icon,
+  Widget _iconBtn(IconData icon,
       VoidCallback onTap, {
         Color? iconColor,
         Color? bgColor,
@@ -2317,8 +2024,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
-
   Widget _inlineDetail(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
@@ -2355,13 +2060,11 @@ class _TaskListPageState extends State<TaskListPage> {
 
   /// ===================== MOBILE ROW =====================
 
-  Widget _heroFlight(
-      BuildContext context,
+  Widget _heroFlight(BuildContext context,
       Animation<double> animation,
       HeroFlightDirection direction,
       BuildContext from,
-      BuildContext to,
-      ) {
+      BuildContext to,) {
     return ScaleTransition(
       scale: CurvedAnimation(
         parent: animation,
@@ -2385,6 +2088,18 @@ class _TaskListPageState extends State<TaskListPage> {
     );
   }
 
+  void _openImageViewer(String imageUrl) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black.withOpacity(0.85),
+        pageBuilder: (_, __, ___) {
+          return _ImageZoomViewer(imageUrl: imageUrl);
+        },
+      ),
+    );
+  }
+
 
 
   Widget _mobileRow(Task task) {
@@ -2395,172 +2110,220 @@ class _TaskListPageState extends State<TaskListPage> {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      child: SizedBox(
-        height: cardHeight,
-        child: Stack(
-          children: [
-            // ================= SWIPE BASE CARD =================
-            Dismissible(
-              key: ValueKey(task.id),
-              direction: DismissDirection.horizontal,
-              background: _swipeBg(
-                color: Colors.green,
-                icon: Icons.check,
-                alignLeft: true,
-              ),
-              secondaryBackground: _swipeBg(
-                color: Colors.red,
-                icon: Icons.close,
-                alignLeft: false,
-              ),
-              confirmDismiss: (direction) async {
-                if (direction == DismissDirection.startToEnd) {
-                  setState(() => task.status = "Approved");
-                  Fluttertoast.showToast(msg: "Approved");
-                } else {
-                  setState(() => task.status = "Rejected");
-                  Fluttertoast.showToast(msg: "Rejected");
-                }
-                return false; // ❌ keep card
-              },
-              child: Hero(
-                tag: task.heroTag,
-                flightShuttleBuilder: _heroFlight, // 👈 reuse same animation
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(18),
-                    onTap: () {
-                      // ❌ do NOT open hero if action panel is open
-                      if (task.panel != CardPanel.none) return;
-
-                      _openHeroDetails(task); // 👈 SAME as web
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: surface,
+      child: Column(
+        children: [
+          // ================= BASE CARD + ACTIONS =================
+          SizedBox(
+            height: cardHeight,
+            child: Stack(
+              children: [
+                // ================= SWIPE BASE CARD =================
+                Dismissible(
+                  key: ValueKey(task.id),
+                  direction: DismissDirection.horizontal,
+                  background: _swipeBg(
+                    color: Colors.green,
+                    icon: Icons.check,
+                    alignLeft: true,
+                  ),
+                  secondaryBackground: _swipeBg(
+                    color: Colors.red,
+                    icon: Icons.close,
+                    alignLeft: false,
+                  ),
+                  confirmDismiss: (direction) async {
+                    if (direction == DismissDirection.startToEnd) {
+                      setState(() => task.status = "Approved");
+                      Fluttertoast.showToast(msg: "Approved");
+                    } else {
+                      setState(() => task.status = "Rejected");
+                      Fluttertoast.showToast(msg: "Rejected");
+                    }
+                    return false;
+                  },
+                  child: Hero(
+                    tag: task.heroTag,
+                    flightShuttleBuilder: _heroFlight,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
                         borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          // IMAGE
-                          Expanded(
-                            flex: 35,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(14),
-                              child: Image.network(
-                                task.imageUrl,
-                                fit: BoxFit.cover,
-                                height: double.infinity,
+                        onTap: () {
+                          setState(() {
+                            task.expanded = !task.expanded;
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: surface,
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.06),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
                               ),
-                            ),
+                            ],
                           ),
-
-                          const SizedBox(width: 14),
-
-                          // CONTENT
-                          Expanded(
-                            flex: 65,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  task.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: _cardTitleStyle(),
+                          child: Row(
+                            children: [
+                              // IMAGE
+                              Expanded(
+                                flex: 35,
+                                child:GestureDetector(
+                                  onTap: () => _openImageViewer(task.imageUrl),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: Image.network(
+                                      task.imageUrl,
+                                      fit: BoxFit.cover,
+                                      height: double.infinity,
+                                    ),
+                                  ),
                                 ),
-                                const SizedBox(height: 6),
-                                Text("UIN: ${task.uin}", style: _cardMetaStyle()),
-                                const SizedBox(height: 4),
-                                Text("Type: ${task.type}", style: _cardMetaStyle()),
-                                const Spacer(),
-                                _status(task.status, isWeb: false),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 14),
+
+                              // CONTENT
+                              Expanded(
+                                flex: 65,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      task.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: _cardTitleStyle(),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      "UIN: ${task.uin}",
+                                      style: _cardMetaStyle(),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "Type: ${task.type}",
+                                      style: _cardMetaStyle(),
+                                    ),
+                                    const Spacer(),
+                                    _status(task.status, isWeb: false),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
 
-            // ================= ARROW TRIGGER =================
-            Positioned(
-              right: 8,
-              top: (cardHeight - 36) / 2,
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    for (final t in tasks) {
-                      t.panel = CardPanel.none;
-                    }
-                    task.panel = CardPanel.actions;
-                  });
-                },
-                child: Container(
-                  height: 36,
-                  width: 36,
-                  decoration: BoxDecoration(
-                    color: surface,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.18),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
+                // ================= ACTION OVERLAY =================
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 320),
+                  curve: Curves.easeInOutCubic,
+                  right: showActions ? 0 : -actionWidth,
+                  top: 0,
+                  bottom: 0,
+                  width: actionWidth,
+                  child: IgnorePointer(
+                    ignoring: !showActions,
+                    child: _ActionsOverlayCard(
+                      onClose: () {
+                        setState(() => task.panel = CardPanel.none);
+                      },
+                      actions: _MobileActionsColumn(
+                        onView: () => _viewTask(task),
+                        onEdit: () => _editTask(task),
+                        onChangeStatus: () => _changeStatus(task),
+                        onDelete: () => _deleteTask(task),
                       ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.chevron_left,
-                    size: 20,
-                    color: Colors.black54,
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
+          ),
 
-            // ================= ACTION OVERLAY =================
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 320),
-              curve: Curves.easeInOutCubic,
-              right: showActions ? 0 : -actionWidth,
-              top: 0,
-              bottom: 0,
-              width: actionWidth,
-              child: IgnorePointer(
-                ignoring: !showActions,
-                child: _ActionsOverlayCard(
-                  onClose: () {
-                    setState(() => task.panel = CardPanel.none);
-                  },
-                  actions: _MobileActionsColumn(
-                    onView: () => _viewTask(task),
-                    onEdit: () => _editTask(task),
-                    onChangeStatus: () {
-                      _changeStatus(task); // 👈 reuse your existing dialog
-                    },
-                    onDelete: () => _deleteTask(task),
-                  ),
+          // ================= PAPER-FOLD DETAILS =================
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(
+              begin: 0,
+              end: task.expanded ? 1 : 0,
+            ),
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeInOutCubic,
+            builder: (context, value, child) {
+              if (value == 0) return const SizedBox.shrink();
+
+              return Transform(
+                alignment: Alignment.topCenter,
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.0016) // perspective
+                  ..rotateX((1 - value) * 1.57), // 90° fold
+                child: Opacity(
+                  opacity: value,
+                  child: child,
                 ),
+              );
+            },
+            child: Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                // 🎨 Brand-aware background
+                color: accent.withOpacity(0.06),
+
+                // 🧾 Paper edge feel
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: accent.withOpacity(0.22),
+                  width: 1,
+                ),
+                // 🌫 Fold shadow (paper depth)
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withOpacity(0.12),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _detailRow("Asset Name", task.name),
+                  _detailRow("UIN", task.uin),
+                  _detailRow("Type", task.type),
+                  _detailRow("Status", task.status),
+                  _detailRow("Assigned To", task.assignedUser),
+                  _detailRow(
+                    "Due Date",
+                    task.scheduledDate.toString().split(' ')[0],
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        setState(() {
+                          task.expanded = false;
+                        });
+                      },
+                      child: const Text("Close"),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
 
   /// ===================== HELPERS =====================
 
@@ -2592,11 +2355,8 @@ class _TaskListPageState extends State<TaskListPage> {
       ),
     );
   }
-
-/// ===================== ACTIONS =====================
-
 }
-
+/// ===================== ACTIONS =====================
 
 // ===================== DUMMY DATA (LOCAL) =====================
 List<Task> mockTasks() {
@@ -2634,60 +2394,7 @@ List<Task> mockTasks() {
   ];
 }
 
-class _InlineSideBar extends StatelessWidget {
-  final bool collapsed;
-  final VoidCallback onAddScheduler;
-  final VoidCallback onExportPdf;
-  final Widget filterSection;
 
-  const _InlineSideBar({
-    required this.collapsed,
-    required this.onAddScheduler,
-    required this.onExportPdf,
-    required this.filterSection,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      width: collapsed ? 72 : 240,
-      decoration: BoxDecoration(
-        color: surface, // 🔥 THIS LINE
-        border: Border(right: BorderSide(color: border)),
-      ),
-      child: Column(
-        children: [
-          /// 🔹 TOP SPACER
-          const SizedBox(height: 2),
-
-          /// 🔹 CENTERED MENU
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  filterSection,
-
-                  const SizedBox(height: 20),
-                  Divider(color: border),
-
-                  const SizedBox(height: 12),
-
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 🧠 SINGLE MENU ITEM (PILL STYLE)
-
-}
 class _ActionsOverlayCard extends StatelessWidget {
   final VoidCallback onClose;
   final Widget actions;
@@ -3160,6 +2867,102 @@ class _MobileActionsColumn extends StatelessWidget {
           size: 16,
           color: color ?? Colors.black54,
         ),
+      ),
+    );
+  }
+}
+class _ImageZoomViewer extends StatefulWidget {
+  final String imageUrl;
+
+  const _ImageZoomViewer({required this.imageUrl});
+
+  @override
+  State<_ImageZoomViewer> createState() => _ImageZoomViewerState();
+}
+class _ImageZoomViewerState extends State<_ImageZoomViewer> {
+  final TransformationController _controller =
+  TransformationController();
+
+  double _scale = 1.0;
+
+  void _zoomIn() {
+    setState(() {
+      _scale = (_scale + 0.3).clamp(1.0, 4.0);
+      _controller.value = Matrix4.identity()..scale(_scale);
+    });
+  }
+
+  void _zoomOut() {
+    setState(() {
+      _scale = (_scale - 0.3).clamp(1.0, 4.0);
+      _controller.value = Matrix4.identity()..scale(_scale);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          /// BACKDROP + CLOSE
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(color: Colors.transparent),
+          ),
+
+          /// IMAGE
+          Center(
+            child: InteractiveViewer(
+              transformationController: _controller,
+              minScale: 1,
+              maxScale: 4,
+              child: Image.network(
+                widget.imageUrl,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+
+          /// TOP CLOSE
+          Positioned(
+            top: 40,
+            right: 20,
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 28),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+
+          /// ZOOM CONTROLS
+          Positioned(
+            bottom: 40,
+            right: 20,
+            child: Column(
+              children: [
+                _zoomBtn(Icons.add, _zoomIn),
+                const SizedBox(height: 12),
+                _zoomBtn(Icons.remove, _zoomOut),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _zoomBtn(IconData icon, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(30),
+      child: Container(
+        height: 46,
+        width: 46,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.6),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white, size: 26),
       ),
     );
   }
