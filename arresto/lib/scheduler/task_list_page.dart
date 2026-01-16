@@ -1,24 +1,41 @@
 import 'package:flutter/material.dart';
-import 'dart:ui';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'dart:ui';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:arresto/networks/ApisRequests.dart';
 import 'package:fluttertoast/fluttertoast.dart' show Fluttertoast;
+import 'package:arresto/app_utility/app_colors.dart';
+import 'package:flutter/services.dart';
 
 
+// ===================== COLOR ROLES =====================
+
+// Brand
+final Color accent = AppColors.app_header_new_color; // orange
+
+// Surfaces
+final Color pageBg  = const Color(0xFFF5F6F8); // light grey (NOT white)
+final Color surface = Colors.white;            // cards
+
+// Structure
+final Color border = const Color(0xFFE0E0E0);
+
+// Text
+final Color textMain  = const Color(0xFF2E2E2E);
+final Color textMuted = const Color(0xFF7A7A7A);
+
+// Sidebar
+final Color sidebarBg = const Color(0xFFF9F4EA); // very soft warm tint
+
+// Status
+final Color success = const Color(0xFF2E7D32); // deep green
+final Color warning = const Color(0xFFF9A825); // amber
+final Color danger  = const Color(0xFFC62828); // deep red
 
 
-// ===================== THEME =====================
-const Color pageBg   = Color(0xFFFBF3D1); // page + appbar stays same
-const Color headerBg = Color(0xFFFBF3D1);
-const Color surface  = Color(0xFFFFDAB3); // ✅ CARD COLOR (NEW)
-const Color border   = Color(0xFFE2B98F);
-const Color textMain = Color(0xFF3B2A1A);
-const Color textMuted= Color(0xFF6B4E3A);
-
+enum CardPanel { none, info, actions }
 
 class Task {
   final String id;
@@ -30,7 +47,13 @@ class Task {
   final String imageUrl;
   String status;
 
-  bool selected; // ✅ NEW
+  bool selected;
+  bool isActive;
+  bool enableWebHero = true; // 🔥 toggle anytime
+  late final String heroTag;
+
+  // 👇 SINGLE SOURCE OF TRUTH
+  CardPanel panel;
 
   Task({
     required this.id,
@@ -41,8 +64,13 @@ class Task {
     required this.assignedUser,
     required this.imageUrl,
     this.status = "pending",
-    this.selected = false, // ✅ default
-  });
+    this.selected = false,
+    this.isActive = true,
+    CardPanel? panel,
+  }) : panel = panel ?? CardPanel.none {
+    // ✅ constructor body (THIS is the correct place)
+    heroTag = "task-hero-$id";
+  }
 
   factory Task.fromJson(Map<String, dynamic> json) {
     DateTime scheduledDate = DateTime.now();
@@ -66,10 +94,11 @@ class Task {
       type: json['type'] ?? '',
       scheduledDate: scheduledDate,
       assignedUser: json['assigned_user']?['name'] ?? 'Unassigned',
-      imageUrl: json['meta_data']?['component_imagepath']
-          ?? 'https://picsum.photos/200',
+      imageUrl:
+      json['meta_data']?['component_imagepath'] ??
+          'https://picsum.photos/200',
       status: json['status'] ?? 'pending',
-      selected: false, // ✅ IMPORTANT
+      isActive: json['is_active'] ?? true,
     );
   }
 }
@@ -84,7 +113,22 @@ class TaskListPage extends StatefulWidget {
 
 class _TaskListPageState extends State<TaskListPage> {
   final ApisRequests _api = ApisRequests();
-  final TextEditingController _search = TextEditingController();
+  final ScrollController _listCtrl = ScrollController();
+  int get selectedCount =>
+      filtered.where((t) => t.selected).length;
+
+  // ===== SIDEBAR FILTER STATE =====
+  Set<String> statusFilter = {};
+  Set<String> typeFilter = {};
+  Set<String> userFilter = {};
+
+  DateTime? fromDateFilter;
+  DateTime? toDateFilter;
+  DateTime? exactDateFilter;
+
+  bool isDarkMode = false;
+
+  bool sidebarCollapsed = false;
 
   bool isDemoMode = true;
 // 🔥 true = dummy cards
@@ -92,6 +136,8 @@ class _TaskListPageState extends State<TaskListPage> {
 
   bool showSearch = false;
   final TextEditingController searchCtrl = TextEditingController();
+
+  bool enableWebHero = true; // ✅ toggle hero on web
 
 
   bool _loading = true;
@@ -102,6 +148,8 @@ class _TaskListPageState extends State<TaskListPage> {
 
   bool selectionMode = false;
 
+
+
   bool get isAllSelected =>
       filtered.isNotEmpty && filtered.every((t) => t.selected);
 
@@ -110,8 +158,41 @@ class _TaskListPageState extends State<TaskListPage> {
     return selectedCount > 0 && selectedCount < filtered.length;
   }
 
-
-
+  InputDecoration _outlinedInput({
+    required String hint,
+    Widget? prefixIcon,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      hintText: hint,
+      isDense: true,
+      prefixIcon: prefixIcon,
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: surface,
+      contentPadding:
+      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: Colors.black.withOpacity(0.12),
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: Colors.black.withOpacity(0.12),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: accent,
+          width: 1.4,
+        ),
+      ),
+    );
+  }
 
 
 
@@ -121,46 +202,7 @@ class _TaskListPageState extends State<TaskListPage> {
     _loadTasks();
   }
 
-  void _viewTask(Task task) {
-    showDialog(
-      context: context,
-      useRootNavigator: true,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text("Task Details"),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _detailRow("Asset Name", task.name),
-                _detailRow("UIN", task.uin),
-                _detailRow("Type", task.type),
-                _detailRow("Status", task.status),
 
-                const Divider(),
-
-                _detailRow("Assigned To", task.assignedUser),
-                _detailRow("Created On",
-                    task.scheduledDate.toString().split(' ')[0]),
-
-                _detailRow("Due Date",
-                    task.scheduledDate.toString().split(' ')[0]),
-
-                _detailRow("Task ID", task.id),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text("Close"),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   Widget _detailRow(String label, String value) {
     return Padding(
@@ -189,7 +231,67 @@ class _TaskListPageState extends State<TaskListPage> {
     );
   }
 
+  Future<void> _viewTask(Task task) async {
+    await showDialog(
+      context: context, // ❌ DO NOT useRootNavigator here
+      builder: (dialogContext) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            dialogBackgroundColor: surface,
+            colorScheme: ColorScheme.light(
+              primary: accent,       // 🔥 title + buttons
+              onPrimary: Colors.white,
+              surface: surface,
+              onSurface: textMain,
+            ),
+          ),
+          child: AlertDialog(
+            title: Text(
+              "Task Details",
+              style: TextStyle(
+                color: accent,        // 🔥 title color
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _detailRow("Asset Name", task.name),
+                  _detailRow("UIN", task.uin),
+                  _detailRow("Type", task.type),
+                  _detailRow("Status", task.status),
 
+                  Divider(color: border),
+
+                  _detailRow("Assigned To", task.assignedUser),
+                  _detailRow(
+                    "Created On",
+                    task.scheduledDate.toString().split(' ')[0],
+                  ),
+                  _detailRow(
+                    "Due Date",
+                    task.scheduledDate.toString().split(' ')[0],
+                  ),
+                  _detailRow("Task ID", task.id),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: Text(
+                  "Close",
+                  style: TextStyle(color: accent), // 🔥 button color
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> _editTask(Task task) async {
     final picked = await showDatePicker(
@@ -197,14 +299,27 @@ class _TaskListPageState extends State<TaskListPage> {
       initialDate: task.scheduledDate,
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: accent,          // 🔥 header + selected date
+              onPrimary: Colors.white,
+              surface: surface,         // calendar bg
+              onSurface: textMain,      // text color
+            ),
+            dialogBackgroundColor: surface,
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (picked != null) {
       setState(() => task.scheduledDate = picked);
 
       await _api.makePutRequest(
-        "https://uatapi.arresto.in/api/client/1825/tasks/${task
-            .id}/reschedule",
+        "https://uatapi.arresto.in/api/client/1825/tasks/${task.id}/reschedule",
         jsonEncode({"scheduled_date": picked.toIso8601String()}),
       );
 
@@ -215,29 +330,36 @@ class _TaskListPageState extends State<TaskListPage> {
   Future<void> _deleteTask(Task task) async {
     final confirm = await showDialog<bool>(
       context: context,
-      useRootNavigator: true, // ✅ IMPORTANT
+      useRootNavigator: true,
       barrierDismissible: true,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text("Delete Task"),
+          backgroundColor: surface,
+          title: Text(
+            "Delete Task",
+            style: TextStyle(
+              color: accent,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           content: const Text(
             "Are you sure you want to delete this task?",
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false); // ✅ close dialog only
-              },
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true); // ✅ confirm delete
-              },
-              child: const Text(
-                "Delete",
-                style: TextStyle(color: Colors.red),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                "Cancel",
+                style: TextStyle(color: textMuted),
               ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: danger,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text("Delete"),
             ),
           ],
         );
@@ -262,32 +384,38 @@ class _TaskListPageState extends State<TaskListPage> {
     }
   }
 
-
   Future<void> _changeStatus(Task task) async {
     showDialog(
       context: context,
       useRootNavigator: true,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text("Change Status"),
+          backgroundColor: surface,
+          title: Text(
+            "Change Status",
+            style: TextStyle(
+              color: accent,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               _statusOption(
                 label: "Pending",
-                color: Colors.orange,
+                color: warning,
                 task: task,
                 dialogContext: dialogContext,
               ),
               _statusOption(
                 label: "Approved",
-                color: Colors.green,
+                color: success,
                 task: task,
                 dialogContext: dialogContext,
               ),
               _statusOption(
                 label: "Rejected",
-                color: Colors.red,
+                color: danger,
                 task: task,
                 dialogContext: dialogContext,
               ),
@@ -297,6 +425,9 @@ class _TaskListPageState extends State<TaskListPage> {
       },
     );
   }
+
+
+
   Widget _statusOption({
     required String label,
     required Color color,
@@ -372,7 +503,7 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
 
-    void _searchTask(String value) {
+  void _searchTask(String value) {
     setState(() {
       filtered = tasks.where((t) {
         final q = value.toLowerCase();
@@ -427,35 +558,1223 @@ class _TaskListPageState extends State<TaskListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isWeb = MediaQuery
-        .of(context)
-        .size
-        .width > 900;
+    final bool isWeb = MediaQuery.of(context).size.width > 900;
 
     return Scaffold(
       backgroundColor: pageBg,
-      appBar: AppBar(
-        backgroundColor: headerBg,
+      appBar: isWeb
+          ? null
+          : AppBar(
+        backgroundColor: surface,
         elevation: 0,
+        iconTheme: IconThemeData(color: textMain),
+        titleTextStyle: TextStyle(
+          color: textMain,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+        ),
       ),
-      body: Column(
+      body: isWeb ? _webBody(context) : _mobileBody(),
+    );
+  }
+
+  Widget _swipeBg({
+    required Color color,
+    required IconData icon,
+    required bool alignLeft,
+  }) {
+    return Container(
+      alignment: alignLeft ? Alignment.centerLeft : Alignment.centerRight,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Icon(icon, color: Colors.white, size: 28),
+    );
+  }
+
+
+  Widget _mobileBody() {
+    return Column(
+      children: [
+        _topBar(),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView.builder(
+            controller: _listCtrl,
+            padding: const EdgeInsets.only(top: 8),
+            itemCount: filtered.length,
+            itemBuilder: (_, i) => _mobileRow(filtered[i]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _applyFilters() {
+    setState(() {
+      filtered = tasks.where((t) {
+        final status = t.status.toLowerCase();
+
+        // ✅ STATUS
+        if (statusFilter.isNotEmpty &&
+            !statusFilter.map((e) => e.toLowerCase()).contains(status)) {
+          return false;
+        }
+
+        // ✅ TYPE
+        if (typeFilter.isNotEmpty && !typeFilter.contains(t.type)) {
+          return false;
+        }
+
+        // ✅ ASSIGNED USER
+        if (userFilter.isNotEmpty && !userFilter.contains(t.assignedUser)) {
+          return false;
+        }
+
+        // ================= DATE FILTERING =================
+
+        // 📅 EXACT DATE (HIGHEST PRIORITY)
+        if (exactDateFilter != null) {
+          final d = exactDateFilter!;
+          final sameDay =
+              t.scheduledDate.year == d.year &&
+                  t.scheduledDate.month == d.month &&
+                  t.scheduledDate.day == d.day;
+
+          if (!sameDay) return false;
+        } else {
+          if (fromDateFilter != null &&
+              toDateFilter != null &&
+              fromDateFilter!.isAfter(toDateFilter!)) {
+            return false;
+          }
+
+// 📅 FROM DATE
+          if (fromDateFilter != null &&
+              t.scheduledDate.isBefore(fromDateFilter!)) {
+            return false;
+          }
+
+// 📅 TO DATE
+          if (toDateFilter != null &&
+              t.scheduledDate.isAfter(toDateFilter!)) {
+            return false;
+          }
+        }
+
+        // ✅ PASSED ALL FILTERS
+        return true;
+      }).toList();
+    });
+  }
+
+  Widget _dateTile({
+    required String label,
+    required DateTime? date,
+    required Function(DateTime) onPick,
+    required VoidCallback onClear,
+  }) {
+    final bool disabled = exactDateFilter != null && label != "Exact";
+
+    return InkWell(
+      onTap: disabled
+          ? null
+          : () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2030),
+        );
+        if (picked != null) onPick(picked);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: border.withOpacity(0.6),
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            /// LABEL
+            SizedBox(
+              width: 46,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: disabled ? textMuted.withOpacity(0.5) : textMain,
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            /// VALUE
+            Expanded(
+              child: Text(
+                date == null
+                    ? "Select date"
+                    : date.toString().split(' ')[0],
+                style: TextStyle(
+                  fontSize: 13,
+                  color: date == null
+                      ? textMuted
+                      : disabled
+                      ? textMuted.withOpacity(0.5)
+                      : textMain,
+                ),
+              ),
+            ),
+
+            /// CLEAR
+            if (date != null && !disabled)
+              InkWell(
+                onTap: onClear,
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close,
+                    size: 14,
+                    color: textMuted,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
+  Widget _statusItem(String label, Color color) {
+    final bool selected = statusFilter.contains(label);
+
+    return InkWell(
+      onTap: () {
+        setState(() {
+          selected
+              ? statusFilter.remove(label)
+              : statusFilter.add(label);
+          _applyFilters();
+        });
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 10),
+
+            Checkbox(
+              value: selected,
+              visualDensity: VisualDensity.compact,
+              onChanged: (_) {
+                setState(() {
+                  selected
+                      ? statusFilter.remove(label)
+                      : statusFilter.add(label);
+                  _applyFilters();
+                });
+              },
+            ),
+
+            const SizedBox(width: 6),
+
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: selected ? textMain : textMuted,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
+  Widget _filterSection({
+    required String title,
+    required Widget child,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _topBar(),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : ListView.builder(
-              padding: const EdgeInsets.only(top: 8),
-              itemCount: filtered.length,
-              itemBuilder: (_, i) =>
-              isWeb ? _webRow(filtered[i]) : _mobileRow(filtered[i]),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+              color: textMuted,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          Divider(color: border, height: 1),
+
+          const SizedBox(height: 6),
+
+          child,
+        ],
+      ),
+    );
+  }
+
+
+
+
+  Widget _sidebarFilterUI() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _filterSection(
+          title: "STATUS",
+          child: Column(
+            children: [
+              _statusItem("Pending", warning),
+              _statusItem("Approved", success),
+              _statusItem("Rejected", danger),
+            ],
+          ),
+        ),
+
+        _filterSection(
+          title: "TYPE",
+          child: Column(
+            children: tasks
+                .map((t) => t.type)
+                .toSet()
+                .map(_checkType)
+                .toList(),
+          ),
+        ),
+
+        _filterSection(
+          title: "ASSIGNED TO",
+          child: Column(
+            children: tasks
+                .map((t) => t.assignedUser)
+                .toSet()
+                .map(_checkUser)
+                .toList(),
+          ),
+        ),
+
+        _filterSection(
+          title: "DATE",
+          child: Column(
+            children: [
+              _dateTile(label: "Exact", date: exactDateFilter,
+                onPick: (d) {
+                  setState(() {
+                    exactDateFilter = d;
+                    fromDateFilter = null;
+                    toDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+                onClear: () {
+                  setState(() {
+                    exactDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+              ),
+
+              _dateTile(label: "From", date: fromDateFilter,
+                onPick: (d) {
+                  setState(() {
+                    fromDateFilter = d;
+                    exactDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+                onClear: () {
+                  setState(() {
+                    fromDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+              ),
+
+              _dateTile(label: "To", date: toDateFilter,
+                onPick: (d) {
+                  setState(() {
+                    toDateFilter = d;
+                    exactDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+                onClear: () {
+                  setState(() {
+                    toDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+
+
+
+
+  Widget _sectionTitle(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10, top: 6),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.6,
+          color: textMuted,
+        ),
+      ),
+    );
+  }
+
+
+  Widget _webBody(BuildContext context) {
+    return Column(
+      children: [
+        _webTopBar(),
+        Expanded(
+          child: Row(
+            children: [
+              _InlineSideBar(
+                collapsed: sidebarCollapsed,
+                onAddScheduler: _addScheduler,
+                onExportPdf: _exportPdf,
+                filterSection: _sidebarFilterUI(),
+              ),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _webDashboard(context),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openAdvancedFilter() {
+    final TextEditingController uinCtrl = TextEditingController();
+    final TextEditingController typeCtrl = TextEditingController();
+
+    DateTime? fromDate;
+    DateTime? toDate;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setD) {
+            return AlertDialog(
+              title: const Text("Advanced Filter"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 🔎 UIN (EXACT)
+                  TextField(
+                    controller: uinCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "UIN (Exact match)",
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // 🧩 TYPE (EXACT)
+                  TextField(
+                    controller: typeCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Type (Exact match)",
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // 📅 DATE RANGE
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final d = await showDatePicker(
+                              context: ctx,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (d != null) {
+                              setD(() => fromDate = d);
+                            }
+                          },
+                          child: Text(
+                            fromDate == null
+                                ? "From date"
+                                : fromDate!.toString().split(' ')[0],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final d = await showDatePicker(
+                              context: ctx,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (d != null) {
+                              setD(() => toDate = d);
+                            }
+                          },
+                          child: Text(
+                            toDate == null
+                                ? "To date"
+                                : toDate!.toString().split(' ')[0],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                // 🧹 CLEAR
+                TextButton(
+                  onPressed: () {
+                    setState(() => filtered = List.from(tasks));
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text("Clear"),
+                ),
+
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      filtered = tasks.where((t) {
+                        if (uinCtrl.text.isNotEmpty && t.uin != uinCtrl.text) return false;
+                        if (typeCtrl.text.isNotEmpty && t.type != typeCtrl.text) return false;
+                        if (fromDate != null && t.scheduledDate.isBefore(fromDate!)) return false;
+                        if (toDate != null && t.scheduledDate.isAfter(toDate!)) return false;
+                        return true;
+                      }).toList();
+                    });
+
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text("Apply"),
+                ),
+
+
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _greySearchBtn(VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      hoverColor: Colors.black.withOpacity(0.04),
+      child: Container(
+        height: 40,
+        width: 40,
+        decoration: BoxDecoration(
+          color: const Color(0xFFEDEDED), // slightly richer grey
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.search,
+          size: 20,
+          color: Color(0xFF424242), // darker for contrast
+        ),
+      ),
+    );
+  }
+
+
+
+
+  Widget _webTopBar() {
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: surface,
+        border: Border(bottom: BorderSide(color: border)),
+      ),
+      child: Row(
+        children: [
+          // ☰ MENU + TITLE (ALIGNED WITH SIDEBAR)
+          SizedBox(
+            width: sidebarCollapsed ? 72 : 240,
+            child: Row(
+              children: [
+                Text(
+                  "",
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: textMain,
+                  ),
+                ),
+
+                if (!sidebarCollapsed)
+                  Text(
+                    "Scheduler",
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: textMain,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const Spacer(),
+
+          // 🔍 SEARCH FIELD (WEB)
+          if (showSearch)
+            SizedBox(
+              width: 260,
+              child: TextField(
+                controller: searchCtrl,
+                autofocus: true,
+                onChanged: _searchTask,
+                decoration: _outlinedInput(
+                  hint: "Search scheduler...",
+                  prefixIcon: Icon(Icons.search, color: textMuted),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      setState(() {
+                        showSearch = false;
+                        searchCtrl.clear();
+                        filtered = List.from(tasks);
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(width: 6),
+          _greySearchBtn(() {
+            setState(() => showSearch = !showSearch);
+          }),
+
+
+
+// ➕ ADD SCHEDULER (ICON ONLY)
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            color: textMain,
+            tooltip: "Add Scheduler",
+            onPressed: _addScheduler,
+          ),
+
+// 📄 EXPORT PDF (ICON ONLY)
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            color: textMain,
+            tooltip: "Export PDF",
+            onPressed: _exportPdf,
+          ),
+
+
+          // ☑️ SELECT ALL (TRI-STATE)
+          Checkbox(
+            tristate: true,
+            value: isAllSelected
+                ? true
+                : isPartiallySelected
+                ? null
+                : false,
+            onChanged: (val) {
+              setState(() {
+                if (val == true) {
+                  selectionMode = true;
+                  for (var t in filtered) {
+                    t.selected = true;
+                  }
+                } else {
+                  selectionMode = false;
+                  for (var t in filtered) {
+                    t.selected = false;
+                  }
+                }
+              });
+            },
+          ),
+
+          // 🗑 DELETE (ONLY WHEN SELECTED)
+          if (hasSelection)
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              color: Colors.red,
+              onPressed: _bulkDelete,
+            ),
+
+          // 🔽 FILTER + BULK STATUS
+          Builder(
+            builder: (btnContext) {
+              return IconButton(
+                icon: const Icon(Icons.filter_list),
+                onPressed: () {
+                  final box =
+                  btnContext.findRenderObject() as RenderBox;
+                  (
+                  context: context,
+                  anchor: box,
+                  );
+                },
+              );
+            },
+          ),
+
+          const SizedBox(width: 12),
+
+          const CircleAvatar(
+            radius: 16,
+            backgroundImage: NetworkImage("https://i.pravatar.cc/150"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webDashboard(BuildContext context) {
+    return Column(
+      children: [
+        // 🔒 FIXED STATS (DO NOT SCROLL)
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: _webStatsRow(),
+        ),
+
+        // 🔽 ONLY CARDS SCROLL
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: _webGrid(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _webStatsRow() {
+    return Row(
+      children: [
+        Expanded(child: _stat("Total Schedulers", tasks.length.toString())),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _stat(
+            "Pending",
+            tasks.where((t) => t.status == "Pending").length.toString(),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _stat(
+            "Approved",
+            tasks.where((t) => t.status == "Approved").length.toString(),
+          ),
+        ),
+        const SizedBox(width: 12),
+        _csvCard(),
+      ],
+    );
+  }
+
+
+  Widget _stat(String title, String value) {
+    return Container(
+      height: 100,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border.withOpacity(0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(color: textMuted)),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              color: accent,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ],
       ),
-
     );
   }
+  void _uploadCsv() {
+    Fluttertoast.showToast(msg: "CSV upload coming next");
+  }
+
+  Widget _csvCard() {
+    return Container(
+      width: 260,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.black.withOpacity(0.12),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min, // 🔥 important
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            "Data Quality",
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: textMain,
+            ),
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: 0,
+            color: accent,
+            backgroundColor: accent.withOpacity(0.2),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 34, // 🔥 control button height
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              onPressed: _uploadCsv,
+              child: const Text("Upload CSV"),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+
+  Widget _webGrid(BuildContext context) {
+    final double cardWidth =
+        (MediaQuery.of(context).size.width - 300) / 2;
+
+    return Wrap(
+      spacing: 16,
+      runSpacing: 16,
+      children: filtered.map((task) {
+        return enableWebHero
+            ? Hero(
+          tag: task.heroTag,
+          flightShuttleBuilder: _heroFlight,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () => _openHeroDetails(task),
+              child: _webCard(task, cardWidth),
+            ),
+          ),
+        )
+            : _webCard(task, cardWidth);
+      }).toList(),
+    );
+  }
+
+  TextStyle _cardText({
+    double size = 14,
+    FontWeight weight = FontWeight.w500,
+    Color? color,
+  }) {
+    return TextStyle(
+      fontFamily: 'Inter',
+      fontSize: size,
+      fontWeight: weight,
+      letterSpacing: 0.3,
+      color: color ?? textMain,
+    );
+  }
+
+  TextStyle _cardTitleStyle() {
+    return TextStyle(
+      fontFamily: 'Inter',
+      fontSize: 15,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.3,
+      color: textMain,
+    );
+  }
+
+  TextStyle _cardMetaStyle() {
+    return TextStyle(
+      fontFamily: 'Inter',
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      letterSpacing: 0.25,
+      color: textMuted,
+    );
+  }
+
+  Widget _paperStripIcon({
+    required IconData icon,
+    required VoidCallback onTap,
+    bool active = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        height: 36,
+        width: 36,
+        decoration: BoxDecoration(
+          color: active ? accent.withOpacity(0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Icon(
+          icon,
+          size: 20,
+          color: active ? accent : Colors.black54,
+        ),
+      ),
+    );
+  }
+
+
+  Widget _webCard(Task task, double width) {
+    const double cardHeight = 190;
+
+    final bool showInfo = task.panel == CardPanel.info;
+    final bool showActions = task.panel == CardPanel.actions;
+    final bool showOverlay = showInfo || showActions;
+
+    final double actionWidth = width * 0.20; // 👈 1/4th tray
+
+    return SizedBox(
+      width: width,
+      height: cardHeight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // ================= BASE CARD =================
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: surface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 35,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.network(
+                      task.imageUrl,
+                      fit: BoxFit.cover,
+                      height: double.infinity,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  flex: 65,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _cardTitleStyle(),
+                      ),
+                      const SizedBox(height: 6),
+                      Text("UIN: ${task.uin}", style: _cardMetaStyle()),
+                      const SizedBox(height: 4),
+                      Text("Type: ${task.type}", style: _cardMetaStyle()),
+                      const SizedBox(height: 10),
+                      _status(task.status, isWeb: true),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ================= OVERLAY =================
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeInOutCubic,
+            right: showOverlay
+                ? 0
+                : -(showActions ? actionWidth : width),
+            top: 0,
+            bottom: 0,
+            width: showActions ? actionWidth : width,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity: showOverlay ? 1 : 0,
+              child: IgnorePointer(
+                ignoring: !showOverlay,
+                child: showInfo
+                    ? _InfoOverlayCard(
+                  task: task,
+                  onClose: () =>
+                      setState(() => task.panel = CardPanel.none),
+                )
+                    : _ActionsOverlayCard(
+                  onClose: () =>
+                      setState(() => task.panel = CardPanel.none),
+                  actions: _ActionPanelContent(
+                    active: showActions, //
+                    onView: () => _viewTask(task),
+                    onEdit: () => _editTask(task),
+                    onChangeStatus: () => _changeStatus(task),
+                    onDelete: () => _deleteTask(task),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeInOutCubic,
+
+            // 👇 THIS is the magic
+            right: showActions
+                ? actionWidth - 22 // moves WITH the panel
+                : 10,              // original position near info button
+
+            top: (cardHeight - 36) / 2 + 36, // 👈 below info icon
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  for (final t in tasks) {
+                    t.panel = CardPanel.none;
+                  }
+                  task.panel =
+                  showActions ? CardPanel.none : CardPanel.actions;
+                });
+              },
+              child: Container(
+                height: 36,
+                width: 36,
+                decoration: BoxDecoration(
+                  color: surface,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: AnimatedRotation(
+                  duration: const Duration(milliseconds: 300),
+                  turns: showActions ? 0.5 : 0.0, // ⬅️ rotates on open
+                  child: Icon(
+                    Icons.chevron_left,
+                    color: showActions ? accent : Colors.black54,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+
+          // ================= PAPER STRIP =================
+          Positioned(
+            right: 10,
+            top: (cardHeight - 72) / 2,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity: showOverlay ? 0 : 1, // hide when panel open
+              child: IgnorePointer(
+                ignoring: showOverlay,
+                child: Container(
+                  width: 44,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: surface,
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      _paperStripIcon(
+                        icon: Icons.info_outline,
+                        active: showInfo,
+                        onTap: () {
+                          setState(() {
+                            for (final t in tasks) {
+                              t.panel = CardPanel.none;
+                            }
+                            task.panel =
+                            showInfo ? CardPanel.none : CardPanel.info;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      _paperStripIcon(
+                        icon: Icons.chevron_left,
+                        active: showActions,
+                        onTap: () {
+                          setState(() {
+                            for (final t in tasks) {
+                              t.panel = CardPanel.none;
+                            }
+                            task.panel =
+                            showActions ? CardPanel.none : CardPanel.actions;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _bulkDelete() async {
+    final selected = tasks.where((t) => t.selected).toList();
+    if (selected.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete selected"),
+        content: Text("Delete ${selected.length} scheduler(s)?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              "Delete",
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      tasks.removeWhere((t) => t.selected);
+      filtered.removeWhere((t) => t.selected);
+      selectionMode = false;
+    });
+
+    Fluttertoast.showToast(msg: "Selected schedulers deleted");
+  }
+
+  void _bulkChangeStatus(String status) {
+    final selected = tasks.where((t) => t.selected).toList();
+    if (selected.isEmpty) return;
+
+    setState(() {
+      for (var t in selected) {
+        t.status = status;
+      }
+      selectionMode = false;
+    });
+
+    Fluttertoast.showToast(msg: "Status changed to $status");
+  }
+
+
+  /// ===================== CARD 3-DOT FOLD MENU =====================
+
+  /// ===================== TOP BAR FILTER FOLD MENU =====================
+
+  /// ===================== CLOSE ANY OPEN FOLD MENU ====================
 
   void _openFilter() {
     showDialog(
@@ -495,6 +1814,80 @@ class _TaskListPageState extends State<TaskListPage> {
     );
   }
 
+  Widget _checkTile({
+    required String label,
+    required bool value,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Checkbox(
+              value: value,
+              visualDensity: VisualDensity.compact,
+              onChanged: (_) => onTap(),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: value ? textMain : textMuted,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
+  Widget _checkStatus(String value) => _checkTile(
+    label: value,
+    value: statusFilter.contains(value),
+    onTap: () {
+      setState(() {
+        statusFilter.contains(value)
+            ? statusFilter.remove(value)
+            : statusFilter.add(value);
+        _applyFilters();
+      });
+    },
+  );
+
+  Widget _checkType(String value) => _checkTile(
+    label: value,
+    value: typeFilter.contains(value),
+    onTap: () {
+      setState(() {
+        typeFilter.contains(value)
+            ? typeFilter.remove(value)
+            : typeFilter.add(value);
+        _applyFilters();
+      });
+    },
+  );
+
+  Widget _checkUser(String value) => _checkTile(
+    label: value,
+    value: userFilter.contains(value),
+    onTap: () {
+      setState(() {
+        userFilter.contains(value)
+            ? userFilter.remove(value)
+            : userFilter.add(value);
+        _applyFilters();
+      });
+    },
+  );
+
+
   void _addScheduler() {
     final TextEditingController nameCtrl = TextEditingController();
     final TextEditingController uinCtrl = TextEditingController();
@@ -503,34 +1896,57 @@ class _TaskListPageState extends State<TaskListPage> {
     showDialog(
       context: context,
       useRootNavigator: true,
+      barrierDismissible: true,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text("Add Scheduler"),
+              backgroundColor: Colors.white,
+              elevation: 14,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              title: Text(
+                "Add Scheduler",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: textMain,
+                ),
+              ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 🏷 ASSET NAME
                   TextField(
                     controller: nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "Asset Name",
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: uinCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "UIN",
-                    ),
+                    decoration: _outlinedInput(hint: "Asset Name"),
                   ),
                   const SizedBox(height: 12),
 
-                  // 📅 Date picker
+                  // 🔢 UIN
+                  TextField(
+                    controller: uinCtrl,
+                    decoration: _outlinedInput(hint: "UIN"),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 📅 DATE PICKER
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.calendar_today),
+                    icon: const Icon(Icons.calendar_today, size: 18),
                     label: Text(
                       selectedDate.toString().split(' ')[0],
+                      style: TextStyle(color: accent),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: accent),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                     onPressed: () async {
                       final picked = await showDatePicker(
@@ -538,76 +1954,109 @@ class _TaskListPageState extends State<TaskListPage> {
                         initialDate: selectedDate,
                         firstDate: DateTime(2020),
                         lastDate: DateTime(2030),
+                        builder: (context, child) {
+                          return Theme(
+                            data: Theme.of(context).copyWith(
+                              colorScheme: ColorScheme.light(
+                                primary: accent,
+                                onPrimary: Colors.white,
+                                surface: Colors.white,
+                                onSurface: textMain,
+                              ),
+                            ),
+                            child: child!,
+                          );
+                        },
                       );
                       if (picked != null) {
-                        setDialogState(() {
-                          selectedDate = picked;
-                        });
+                        setDialogState(() => selectedDate = picked);
                       }
                     },
                   ),
                 ],
               ),
+              actionsPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               actions: [
                 TextButton(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                  },
-                  child: const Text("Cancel"),
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: Text(
+                    "Cancel",
+                    style: TextStyle(color: textMuted),
+                  ),
                 ),
                 ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () async {
+                    if (nameCtrl.text.trim().isEmpty ||
+                        uinCtrl.text.trim().isEmpty) {
+                      Fluttertoast.showToast(
+                        msg: "Asset name & UIN are required",
+                      );
+                      return;
+                    }
+
+                    Navigator.of(dialogContext).pop();
+
+                    if (isDemoMode) {
+                      final newTask = Task(
+                        id: DateTime.now()
+                            .millisecondsSinceEpoch
+                            .toString(),
+                        name: nameCtrl.text.trim(),
+                        uin: uinCtrl.text.trim(),
+                        type: "Demo",
+                        scheduledDate: selectedDate,
+                        assignedUser: "Demo User",
+                        imageUrl: "https://picsum.photos/200?demo",
+                        status: "Pending",
+                      );
+
+                      setState(() {
+                        tasks.insert(0, newTask);
+                        filtered.insert(0, newTask);
+                      });
+
+                      Fluttertoast.showToast(
+                        msg: "Scheduler added (Demo)",
+                      );
+                    } else {
+                      final res = await _api.makePostRequest(
+                        "https://uatapi.arresto.in/api/client/1825/tasks",
+                        jsonEncode({
+                          "meta_data": {
+                            "component_name": nameCtrl.text.trim(),
+                          },
+                          "field_value": uinCtrl.text.trim(),
+                          "schedule_date":
+                          selectedDate.toIso8601String(),
+                        }),
+                      );
+
+                      final decoded = jsonDecode(res.body);
+                      final newTask = Task.fromJson(decoded['data']);
+
+                      setState(() {
+                        tasks.insert(0, newTask);
+                        filtered.insert(0, newTask);
+                      });
+
+                      Fluttertoast.showToast(
+                        msg: "Scheduler added",
+                      );
+                    }
+                  },
                   child: const Text("Save"),
-            onPressed: () async {
-            if (nameCtrl.text.isEmpty || uinCtrl.text.isEmpty) {
-            Fluttertoast.showToast(msg: "Asset name & UIN are required");
-            return;
-            }
-
-            Navigator.of(dialogContext).pop();
-
-            if (isDemoMode) {
-            // 🧪 DEMO ADD
-            final newTask = Task(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            name: nameCtrl.text,
-            uin: uinCtrl.text,
-            type: "Demo",
-            scheduledDate: selectedDate,
-            assignedUser: "Demo User",
-            imageUrl: "https://picsum.photos/200?demo",
-            status: "Pending",
-            );
-
-            setState(() {
-            tasks.insert(0, newTask);
-            filtered.insert(0, newTask);
-            });
-
-            Fluttertoast.showToast(msg: "Scheduler added (Demo)");
-            } else {
-            // 🌐 REAL API ADD
-            final res = await _api.makePostRequest(
-            "https://uatapi.arresto.in/api/client/1825/tasks",
-            jsonEncode({
-            "meta_data": {
-            "component_name": nameCtrl.text,
-            },
-            "field_value": uinCtrl.text,
-            "schedule_date": selectedDate.toIso8601String(),
-            }),
-            );
-
-            final decoded = jsonDecode(res.body);
-            final newTask = Task.fromJson(decoded['data']);
-
-            setState(() {
-            tasks.insert(0, newTask);
-            filtered.insert(0, newTask);
-            });
-
-            Fluttertoast.showToast(msg: "Scheduler added");
-            }
-            },
                 ),
               ],
             );
@@ -619,20 +2068,18 @@ class _TaskListPageState extends State<TaskListPage> {
 
   /// ===================== TOP BAR =====================
 
-
   Widget _topBar() {
     final selectedCount = tasks.where((t) => t.selected).length;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: headerBg,
+        color: surface,
         border: Border(bottom: BorderSide(color: border)),
       ),
       child: Row(
         children: [
-
-          /// 🔍 TITLE OR SEARCH FIELD (INLINE)
+          /// 🏷 TITLE
           Text(
             selectionMode ? "$selectedCount selected" : "Scheduler",
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -643,7 +2090,7 @@ class _TaskListPageState extends State<TaskListPage> {
 
           const Spacer(),
 
-// 🔍 INLINE SEARCH FIELD (RIGHT SIDE)
+          /// 🔍 INLINE SEARCH FIELD
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: showSearch
@@ -658,7 +2105,8 @@ class _TaskListPageState extends State<TaskListPage> {
                 decoration: InputDecoration(
                   hintText: "Search scheduler...",
                   isDense: true,
-                  prefixIcon: const Icon(Icons.search),
+                  prefixIcon:
+                  Icon(Icons.search, color: textMuted),
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.close),
                     onPressed: () {
@@ -678,29 +2126,59 @@ class _TaskListPageState extends State<TaskListPage> {
                 : const SizedBox.shrink(),
           ),
 
-
           /// 🔍 SEARCH ICON
-          _iconBtn(Icons.search, () {
-            setState(() => showSearch = true);
-          }),
+          _iconBtn(
+            Icons.search,
+                () {
+              setState(() => showSearch = true);
+            },
+            iconColor: textMuted,
+            bgColor: Colors.transparent,
+          ),
           const SizedBox(width: 8),
 
+          /// ☑ SELECT ALL
           _selectAllBtn(),
           const SizedBox(width: 8),
 
-          _iconBtn(Icons.add, _addScheduler),
+          /// ➕ ADD
+          _iconBtn(
+            Icons.add,
+            _addScheduler,
+            iconColor: Colors.white,
+            bgColor: Colors.grey.shade700,
+          ),
           const SizedBox(width: 8),
 
-          _iconBtn(Icons.filter_list, _openFilter),
+          /// 🔽 FILTER
+          _iconBtn(
+            Icons.filter_list,
+            _openFilter,
+            iconColor: Colors.white,
+            bgColor: Colors.grey.shade700,
+          ),
           const SizedBox(width: 8),
 
-          _iconBtn(Icons.picture_as_pdf, _exportPdf),
+          /// 📄 EXPORT
+          _iconBtn(
+            Icons.picture_as_pdf,
+            _exportPdf,
+            iconColor: Colors.white,
+            bgColor: Colors.grey.shade700,
+          ),
 
+          /// 🗑 DELETE (ONLY WHEN SELECTED)
           if (selectionMode && hasSelection) ...[
             const SizedBox(width: 8),
-            _iconBtn(Icons.delete, _deleteSelected),
+            _iconBtn(
+              Icons.delete,
+              _deleteSelected,
+              iconColor: Colors.red,
+              bgColor: Colors.red.withOpacity(0.12),
+            ),
           ],
 
+          /// ❌ EXIT SELECTION
           if (selectionMode)
             IconButton(
               icon: const Icon(Icons.close),
@@ -711,6 +2189,7 @@ class _TaskListPageState extends State<TaskListPage> {
       ),
     );
   }
+
 
 
   void _exitSelectionMode() {
@@ -772,25 +2251,32 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
 
-  Widget _iconBtn(IconData icon, VoidCallback onTap) {
+  Widget _iconBtn(
+      IconData icon,
+      VoidCallback onTap, {
+        Color? iconColor,
+        Color? bgColor,
+      }) {
     return InkWell(
+      hoverColor: accent.withOpacity(0.04),
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: 38,
         width: 38,
         decoration: BoxDecoration(
-          color: Colors.grey.shade700,
+          color: bgColor ?? Colors.grey.shade700,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(
           icon,
-          color: Colors.white,
+          color: iconColor ?? Colors.white,
           size: 18,
         ),
       ),
     );
   }
+
 
   Widget _selectAllBtn() {
     IconData icon;
@@ -833,372 +2319,250 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
 
-  /// ===================== TABLE HEADER =====================
+  Widget _inlineDetail(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              "$label:",
+              style: _cardMetaStyle().copyWith(
+                fontSize: 11,
+                color: textMain,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value.isEmpty ? "-" : value,
+              style: _cardText(
+                size: 11,
+                color: textMain,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   /// ===================== WEB ROW =====================
-  Widget _webRow(Task task) {
-    return InkWell(
-      onLongPress: kIsWeb ? null : () {
-        setState(() {
-          selectionMode = true;
-          task.selected = true;
-        });
-      },
 
-      onTap: () {
-        if (selectionMode) {
-          setState(() {
-            task.selected = !task.selected;
-            if (!hasSelection) selectionMode = false;
-          });
-        } else {
-          _viewTask(task);
-        }
-      },
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: surface,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
+
+  /// ===================== MOBILE ROW =====================
+
+  Widget _heroFlight(
+      BuildContext context,
+      Animation<double> animation,
+      HeroFlightDirection direction,
+      BuildContext from,
+      BuildContext to,
+      ) {
+    return ScaleTransition(
+      scale: CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeInOutCubic,
+      ),
+      child: to.widget,
+    );
+  }
+
+  void _openHeroDetails(Task task) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black.withOpacity(0.45),
+        transitionDuration: const Duration(milliseconds: 420),
+        reverseTransitionDuration: const Duration(milliseconds: 320),
+        pageBuilder: (_, __, ___) {
+          return _HeroTaskPopup(task: task);
+        },
+      ),
+    );
+  }
+
+
+
+  Widget _mobileRow(Task task) {
+    const double cardHeight = 190;
+    const double actionWidth = 72;
+
+    final bool showActions = task.panel == CardPanel.actions;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: SizedBox(
+        height: cardHeight,
+        child: Stack(
           children: [
-            // 🖼 IMAGE + CHECKBOX OVERLAY
-            Stack(
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: border),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      task.imageUrl,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
+            // ================= SWIPE BASE CARD =================
+            Dismissible(
+              key: ValueKey(task.id),
+              direction: DismissDirection.horizontal,
+              background: _swipeBg(
+                color: Colors.green,
+                icon: Icons.check,
+                alignLeft: true,
+              ),
+              secondaryBackground: _swipeBg(
+                color: Colors.red,
+                icon: Icons.close,
+                alignLeft: false,
+              ),
+              confirmDismiss: (direction) async {
+                if (direction == DismissDirection.startToEnd) {
+                  setState(() => task.status = "Approved");
+                  Fluttertoast.showToast(msg: "Approved");
+                } else {
+                  setState(() => task.status = "Rejected");
+                  Fluttertoast.showToast(msg: "Rejected");
+                }
+                return false; // ❌ keep card
+              },
+              child: Hero(
+                tag: task.heroTag,
+                flightShuttleBuilder: _heroFlight, // 👈 reuse same animation
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () {
+                      // ❌ do NOT open hero if action panel is open
+                      if (task.panel != CardPanel.none) return;
 
-                // ✅ Checkbox (web-style overlay)
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  child: AnimatedOpacity(
-                    opacity: selectionMode ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
+                      _openHeroDetails(task); // 👈 SAME as web
+                    },
                     child: Container(
-                      width: 22,
-                      height: 22,
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9),
-                        shape: BoxShape.circle,
+                        color: surface,
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.06),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
-                      child: Checkbox(
-                        value: task.selected,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        onChanged: (val) {
-                          setState(() {
-                            selectionMode = true;   // ⭐ ENTER SELECTION MODE
-                            task.selected = val ?? false;
-                          });
-                        },
+                      child: Row(
+                        children: [
+                          // IMAGE
+                          Expanded(
+                            flex: 35,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: Image.network(
+                                task.imageUrl,
+                                fit: BoxFit.cover,
+                                height: double.infinity,
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(width: 14),
+
+                          // CONTENT
+                          Expanded(
+                            flex: 65,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  task.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: _cardTitleStyle(),
+                                ),
+                                const SizedBox(height: 6),
+                                Text("UIN: ${task.uin}", style: _cardMetaStyle()),
+                                const SizedBox(height: 4),
+                                Text("Type: ${task.type}", style: _cardMetaStyle()),
+                                const Spacer(),
+                                _status(task.status, isWeb: false),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-              ],
-            ),
-
-
-            const SizedBox(width: 16),
-
-// ✅ NEW CLEAN CARD CONTENT
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 🏷 Asset Name
-                  Text(
-                    task.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: textMain,
-                    ),
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // 🔢 UIN
-                  Text(
-                    "UIN: ${task.uin}",
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: textMuted,
-                    ),
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // 🧩 TYPE
-                  Text(
-                    "Type: ${task.type}",
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: textMuted,
-                    ),
-                  ),
-                ],
               ),
             ),
 
-            _status(task.status, isWeb: true),
-            const SizedBox(width: 12),
-            _actions(task),
+            // ================= ARROW TRIGGER =================
+            Positioned(
+              right: 8,
+              top: (cardHeight - 36) / 2,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    for (final t in tasks) {
+                      t.panel = CardPanel.none;
+                    }
+                    task.panel = CardPanel.actions;
+                  });
+                },
+                child: Container(
+                  height: 36,
+                  width: 36,
+                  decoration: BoxDecoration(
+                    color: surface,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.chevron_left,
+                    size: 20,
+                    color: Colors.black54,
+                  ),
+                ),
+              ),
+            ),
+
+            // ================= ACTION OVERLAY =================
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeInOutCubic,
+              right: showActions ? 0 : -actionWidth,
+              top: 0,
+              bottom: 0,
+              width: actionWidth,
+              child: IgnorePointer(
+                ignoring: !showActions,
+                child: _ActionsOverlayCard(
+                  onClose: () {
+                    setState(() => task.panel = CardPanel.none);
+                  },
+                  actions: _MobileActionsColumn(
+                    onView: () => _viewTask(task),
+                    onEdit: () => _editTask(task),
+                    onChangeStatus: () {
+                      _changeStatus(task); // 👈 reuse your existing dialog
+                    },
+                    onDelete: () => _deleteTask(task),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-
-
-
-  /// ===================== MOBILE ROW =====================
-  Widget _mobileRow(Task task) {
-    return Dismissible(
-      key: ValueKey(task.id),
-
-      // 👉 LEFT = APPROVE, RIGHT = DELETE
-      direction: DismissDirection.horizontal,
-
-      // 🟢 Swipe RIGHT → APPROVE
-      background: Container(
-        alignment: Alignment.centerLeft,
-        padding: const EdgeInsets.only(left: 20),
-        decoration: BoxDecoration(
-          color: Colors.green.shade600,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Icon(Icons.check, color: Colors.white, size: 28),
-      ),
-
-      // 🔴 Swipe LEFT → DELETE
-      secondaryBackground: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        decoration: BoxDecoration(
-          color: Colors.red.shade600,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Icon(Icons.delete, color: Colors.white, size: 28),
-      ),
-
-      // ❗ Decide what happens
-      confirmDismiss: (direction) async {
-        if (direction == DismissDirection.startToEnd) {
-          // ✅ APPROVE
-          if (task.status != "Approved") {
-            setState(() {
-              task.status = "Approved";
-            });
-
-            if (!isDemoMode) {
-              await _api.makePutRequest(
-                "https://uatapi.arresto.in/api/client/1825/tasks/${task.id}/status",
-                jsonEncode({"status": "Approved"}),
-              );
-            }
-
-            Fluttertoast.showToast(msg: "Task approved");
-          }
-          return false; // ❌ Don't remove card
-        }
-
-        if (direction == DismissDirection.endToStart) {
-          // ❌ DELETE CONFIRMATION
-          return await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text("Delete Task"),
-              content: const Text("Are you sure you want to delete this task?"),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text("Cancel"),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text(
-                    "Delete",
-                    style: TextStyle(color: Colors.red),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return false;
-      },
-
-      // 🗑 FINAL DELETE
-      onDismissed: (_) {
-        setState(() {
-          tasks.remove(task);
-          filtered.remove(task);
-        });
-
-        Fluttertoast.showToast(msg: "Task deleted");
-      },
-
-      child: InkWell(
-        onLongPress: () {
-          setState(() {
-            selectionMode = true;
-            task.selected = true;
-          });
-        },
-        onTap: () {
-          if (selectionMode) {
-            setState(() {
-              task.selected = !task.selected;
-              if (!hasSelection) selectionMode = false;
-            });
-          } else {
-            _viewTask(task);
-          }
-        },
-
-        // 👇 YOUR EXISTING CARD UI (UNCHANGED)
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: surface,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Stack(
-                    children: [
-                      Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: border),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(task.imageUrl, fit: BoxFit.cover),
-                        ),
-                      ),
-
-                      if (selectionMode)
-                        Positioned(
-                          top: 4,
-                          left: 4,
-                          child: Checkbox(
-                            value: task.selected,
-                            visualDensity: VisualDensity.compact,
-                            onChanged: (val) {
-                              setState(() {
-                                selectionMode = true;
-                                task.selected = val ?? false;
-                              });
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-
-                  const SizedBox(width: 12),
-
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          task.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w600,
-                            color: textMain,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "UIN: ${task.uin}",
-                          style: TextStyle(fontSize: 12, color: textMuted),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "Type: ${task.type}",
-                          style: TextStyle(fontSize: 12, color: textMuted),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _status(task.status, isWeb: false),
-                  _actions(task),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-
-
   /// ===================== HELPERS =====================
-  Widget _image(String url, {double size = 48}) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: border),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Image.network(url, fit: BoxFit.cover),
-      ),
-    );
-  }
-
-  Widget _cell(String text, int flex) {
-    return Expanded(
-      flex: flex,
-      child: Text(
-        text,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 14, color: textMain),
-      ),
-    );
-  }
 
   Widget _status(String status, {required bool isWeb}) {
     // ❌ hide "Pending" text label on WEB
@@ -1207,10 +2571,10 @@ class _TaskListPageState extends State<TaskListPage> {
     }
 
     final color = status == "Approved"
-        ? Colors.green
+        ? success
         : status == "Rejected"
-        ? Colors.red
-        : Colors.orange;
+        ? danger
+        : warning;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1229,74 +2593,10 @@ class _TaskListPageState extends State<TaskListPage> {
     );
   }
 
-
-
-  /// ===================== ACTIONS =====================
-  IconData _statusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case "approved":
-        return Icons.check_circle;
-      case "rejected":
-        return Icons.cancel;
-      case "pending":
-      default:
-        return Icons.hourglass_bottom;
-    }
-  }
-
-  Color _statusColor(String status) {
-    switch (status.toLowerCase()) {
-      case "approved":
-        return Colors.green;
-      case "rejected":
-        return Colors.red;
-      case "pending":
-      default:
-        return Colors.orange;
-    }
-  }
-
-  Widget _actions(Task task) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 🔁 STATUS ICON (dynamic)
-        Tooltip(
-          message: "Change status",
-          child: IconButton(
-            icon: Icon(_statusIcon(task.status)),
-            color: _statusColor(task.status),
-            onPressed: task.status == "Approved"
-                ? null // ❌ disable when approved
-                : () => _changeStatus(task),
-          ),
-        ),
-
-        // 👁 View
-        IconButton(
-          icon: const Icon(Icons.visibility_outlined),
-          color: Colors.blue,
-          onPressed: () => _viewTask(task),
-        ),
-
-        // ✏️ Edit
-        IconButton(
-          icon: const Icon(Icons.edit_outlined),
-          color: Colors.green,
-          onPressed: () => _editTask(task),
-        ),
-
-        // 🗑 Delete
-        IconButton(
-          icon: const Icon(Icons.delete_outline),
-          color: Colors.red,
-          onPressed: () => _deleteTask(task),
-        ),
-      ],
-    );
-  }
+/// ===================== ACTIONS =====================
 
 }
+
 
 // ===================== DUMMY DATA (LOCAL) =====================
 List<Task> mockTasks() {
@@ -1332,4 +2632,535 @@ List<Task> mockTasks() {
       status: "Rejected",
     ),
   ];
+}
+
+class _InlineSideBar extends StatelessWidget {
+  final bool collapsed;
+  final VoidCallback onAddScheduler;
+  final VoidCallback onExportPdf;
+  final Widget filterSection;
+
+  const _InlineSideBar({
+    required this.collapsed,
+    required this.onAddScheduler,
+    required this.onExportPdf,
+    required this.filterSection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: collapsed ? 72 : 240,
+      decoration: BoxDecoration(
+        color: surface, // 🔥 THIS LINE
+        border: Border(right: BorderSide(color: border)),
+      ),
+      child: Column(
+        children: [
+          /// 🔹 TOP SPACER
+          const SizedBox(height: 2),
+
+          /// 🔹 CENTERED MENU
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  filterSection,
+
+                  const SizedBox(height: 20),
+                  Divider(color: border),
+
+                  const SizedBox(height: 12),
+
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 🧠 SINGLE MENU ITEM (PILL STYLE)
+
+}
+class _ActionsOverlayCard extends StatelessWidget {
+  final VoidCallback onClose;
+  final Widget actions;
+
+  const _ActionsOverlayCard({
+    required this.onClose,
+    required this.actions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+
+          /// ❌ CLOSE BUTTON (TOP)
+
+
+          const SizedBox(height: 6),
+
+          /// ✅ ACTIONS WITH PROPER LEFT/RIGHT MARGIN
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Center(child: actions),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+        ],
+      ),
+    );
+  }
+}
+class _DelayedFade extends StatefulWidget {
+  final Widget child;
+  final int delay;
+
+  const _DelayedFade({
+    required this.child,
+    required this.delay,
+  });
+
+  @override
+  State<_DelayedFade> createState() => _DelayedFadeState();
+}
+class _DelayedFadeState extends State<_DelayedFade> {
+  bool _show = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: widget.delay), () {
+      if (mounted) setState(() => _show = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 260),
+      opacity: _show ? 1 : 0,
+      child: AnimatedScale(
+        duration: const Duration(milliseconds: 260),
+        scale: _show ? 1 : 0.92,
+        child: widget.child,
+      ),
+    );
+  }
+}
+class _HeroTaskPopup extends StatelessWidget {
+  final Task task;
+
+  const _HeroTaskPopup({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final Size size = MediaQuery.of(context).size;
+
+    // 📏 NARROWER – LIKE CARD WIDTH
+    final double popupWidth =
+    size.width.clamp(300, 360).toDouble();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.pop(context),
+      child: Stack(
+        children: [
+          /// 🌫 BLUR BACKDROP
+          BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              color: Colors.black.withOpacity(0.35),
+            ),
+          ),
+
+          /// 🎯 CENTER CARD
+          Center(
+            child: Hero(
+              tag: task.heroTag,
+              child: Material(
+                color: Colors.transparent,
+                child: AnimatedScale(
+                  scale: 1,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic,
+                  child: Container(
+                    width: popupWidth,
+                    constraints: BoxConstraints(
+                      maxHeight: size.height * 0.8, // 🔥 prevents overflow
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7F8FA), // ✅ NEW COLOR
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.25),
+                          blurRadius: 30,
+                          offset: const Offset(0, 18),
+                        ),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        /// 🖼 IMAGE (TOP)
+                        SizedBox(
+                          height: 200,
+                          width: double.infinity,
+                          child: Image.network(
+                            task.imageUrl,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+
+                        /// 📄 DETAILS (SCROLLABLE – NO OVERFLOW)
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Task Details",
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+
+                                const SizedBox(height: 14),
+
+                                _row("Asset Name", task.name),
+                                _row("UIN", task.uin),
+                                _row("Type", task.type),
+                                _row("Status", task.status),
+
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  child: Divider(height: 1),
+                                ),
+
+                                _row("Assigned To", task.assignedUser),
+                                _row(
+                                  "Created On",
+                                  task.scheduledDate
+                                      .toString()
+                                      .split(' ')[0],
+                                ),
+                                _row(
+                                  "Due Date",
+                                  task.scheduledDate
+                                      .toString()
+                                      .split(' ')[0],
+                                ),
+                                _row("Task ID", task.id),
+
+                                const SizedBox(height: 16),
+
+                                /// CLOSE BUTTON
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context),
+                                    child: const Text("Close"),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 105,
+            child: Text(
+              "$label:",
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value.isEmpty ? "-" : value,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+class _InfoOverlayCard extends StatelessWidget {
+  final Task task;
+  final VoidCallback onClose;
+
+  const _InfoOverlayCard({
+    required this.task,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        children: [
+          // ================= HEADER =================
+          Row(
+            children: [
+              const Icon(Icons.info_outline, size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                "Task Details",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close),
+                splashRadius: 18,
+                onPressed: onClose,
+              ),
+            ],
+          ),
+
+          const Divider(height: 16),
+
+          // ================= BODY =================
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // IMAGE (same size as base card)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.network(
+                    task.imageUrl,
+                    width: 140,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+
+                const SizedBox(width: 14),
+
+                // DETAILS
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      children: [
+                        _infoRow("Asset", task.name),
+                        _infoRow("UIN", task.uin),
+                        _infoRow("Type", task.type),
+                        _infoRow("Status", task.status),
+
+                        const SizedBox(height: 10),
+                        const Divider(),
+
+                        _infoRow("Assigned To", task.assignedUser),
+                        _infoRow(
+                          "Created On",
+                          task.scheduledDate.toString().split(' ')[0],
+                        ),
+                        _infoRow(
+                          "Due Date",
+                          task.scheduledDate.toString().split(' ')[0],
+                        ),
+                        _infoRow("Task ID", task.id),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 90,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.black54,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value.isEmpty ? "-" : value,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+class _ActionPanelContent extends StatelessWidget {
+  final bool active; // 👈 add this
+  final VoidCallback onView;
+  final VoidCallback onEdit;
+  final VoidCallback onChangeStatus;
+  final VoidCallback onDelete;
+
+  const _ActionPanelContent({
+    required this.active,
+    required this.onView,
+    required this.onEdit,
+    required this.onChangeStatus,
+    required this.onDelete,
+  });
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _icon(Icons.visibility, onView),
+        const SizedBox(height: 6),
+        _icon(Icons.edit, onEdit),
+        const SizedBox(height: 6),
+        _icon(Icons.sync_alt, onChangeStatus),
+        const SizedBox(height: 6),
+        _icon(Icons.delete, onDelete, color: Colors.red),
+      ],
+    );
+  }
+  Widget _icon(
+      IconData icon,
+      VoidCallback onTap, {
+        Color? color,
+      }) {
+    final bool isActive = active;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 32,
+        width: 32,
+        decoration: BoxDecoration(
+          color: isActive
+              ? (color ?? accent) // ✅ STAYS COLORED
+              : const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          icon,
+          size: 16,
+          color: isActive
+              ? Colors.white
+              : (color ?? Colors.black54),
+        ),
+      ),
+    );
+  }
+}
+class _MobileActionsColumn extends StatelessWidget {
+  final VoidCallback onView;
+  final VoidCallback onEdit;
+  final VoidCallback onChangeStatus;
+  final VoidCallback onDelete;
+
+  const _MobileActionsColumn({
+    required this.onView,
+    required this.onEdit,
+    required this.onChangeStatus,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _icon(Icons.visibility, onView),
+        const SizedBox(height: 8),
+
+        _icon(Icons.edit, onEdit),
+        const SizedBox(height: 8),
+
+        // 🔁 CHANGE STATUS (APPROVE / REJECT)
+        _icon(Icons.swap_horiz, onChangeStatus),
+        const SizedBox(height: 8),
+
+        _icon(Icons.delete, onDelete, color: Colors.red),
+      ],
+    );
+  }
+
+  Widget _icon(IconData icon, VoidCallback onTap, {Color? color}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 30,
+        width: 30,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          icon,
+          size: 16,
+          color: color ?? Colors.black54,
+        ),
+      ),
+    );
+  }
 }
