@@ -32,7 +32,6 @@ final Color warning = AppColors.pending_yellow;
 final Color danger  = AppColors.reject_red;
 
 
-
 enum CardPanel { none, info, actions }
 
 class Task {
@@ -560,23 +559,28 @@ class _TaskListPageState extends State<TaskListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isWeb = MediaQuery.of(context).size.width > 900;
+    final bool isWeb = MediaQuery
+        .of(context)
+        .size
+        .width > 900;
 
     return Scaffold(
       backgroundColor: pageBg,
-      body: isWeb
-          ? _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: _webGrid(context), // ✅ cards only
+      appBar: isWeb
+          ? null
+          : AppBar(
+        backgroundColor: surface,
+        elevation: 0,
+        iconTheme: IconThemeData(color: textMain),
+        titleTextStyle: TextStyle(
+          color: textMain,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
         ),
-      )
-          : _mobileBody(), // ✅ mobile cards only
+      ),
+      body: isWeb ? _webBody(context) : _mobileBody(),
     );
   }
-
 
   Widget _swipeBg({
     required Color color,
@@ -596,15 +600,22 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
   Widget _mobileBody() {
-    return _loading
-        ? const Center(child: CircularProgressIndicator())
-        : ListView.builder(
-      padding: const EdgeInsets.only(top: 12),
-      itemCount: filtered.length,
-      itemBuilder: (_, i) => _mobileRow(filtered[i]),
+    return Column(
+      children: [
+        _topBar(),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView.builder(
+            controller: _listCtrl,
+            padding: const EdgeInsets.only(top: 8),
+            itemCount: filtered.length,
+            itemBuilder: (_, i) => _mobileRow(filtered[i]),
+          ),
+        ),
+      ],
     );
   }
-
 
   void _applyFilters() {
     setState(() {
@@ -838,7 +849,101 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
+  Widget _sidebarFilterUI() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _filterSection(
+          title: "STATUS",
+          child: Column(
+            children: [
+              _statusItem("Pending", warning),
+              _statusItem("Approved", success),
+              _statusItem("Rejected", danger),
+            ],
+          ),
+        ),
 
+        _filterSection(
+          title: "TYPE",
+          child: Column(
+            children: tasks
+                .map((t) => t.type)
+                .toSet()
+                .map(_checkType)
+                .toList(),
+          ),
+        ),
+
+        _filterSection(
+          title: "ASSIGNED TO",
+          child: Column(
+            children: tasks
+                .map((t) => t.assignedUser)
+                .toSet()
+                .map(_checkUser)
+                .toList(),
+          ),
+        ),
+
+        _filterSection(
+          title: "DATE",
+          child: Column(
+            children: [
+              _dateTile(label: "Exact", date: exactDateFilter,
+                onPick: (d) {
+                  setState(() {
+                    exactDateFilter = d;
+                    fromDateFilter = null;
+                    toDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+                onClear: () {
+                  setState(() {
+                    exactDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+              ),
+
+              _dateTile(label: "From", date: fromDateFilter,
+                onPick: (d) {
+                  setState(() {
+                    fromDateFilter = d;
+                    exactDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+                onClear: () {
+                  setState(() {
+                    fromDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+              ),
+
+              _dateTile(label: "To", date: toDateFilter,
+                onPick: (d) {
+                  setState(() {
+                    toDateFilter = d;
+                    exactDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+                onClear: () {
+                  setState(() {
+                    toDateFilter = null;
+                    _applyFilters();
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
 
   Widget _sectionTitle(String text) {
@@ -857,7 +962,30 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
+  Widget _webBody(BuildContext context) {
+    return Column(
+      children: [
+        _webTopBar(),
+        Expanded(
+          child: Row(
+            children: [
+              _InlineSideBar(
+                collapsed: sidebarCollapsed,
+                onAddScheduler: _addScheduler,
+                onExportPdf: _exportPdf,
+                filterSection: _sidebarFilterUI(),
+              ),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _webDashboard(context),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
   void _openAdvancedFilter() {
     final TextEditingController uinCtrl = TextEditingController();
@@ -1015,6 +1143,205 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
+  Widget _webTopBar() {
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: surface,
+        border: Border(bottom: BorderSide(color: border)),
+      ),
+      child: Row(
+        children: [
+          // ☰ MENU + TITLE (ALIGNED WITH SIDEBAR)
+          SizedBox(
+            width: sidebarCollapsed ? 72 : 240,
+            child: Row(
+              children: [
+                Text(
+                  "",
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: textMain,
+                  ),
+                ),
+
+                if (!sidebarCollapsed)
+                  Text(
+                    "Scheduler",
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: textMain,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const Spacer(),
+
+          // 🔍 SEARCH FIELD (WEB)
+          if (showSearch)
+            SizedBox(
+              width: 260,
+              child: TextField(
+                controller: searchCtrl,
+                autofocus: true,
+                onChanged: _searchTask,
+                decoration: _outlinedInput(
+                  hint: "Search scheduler...",
+                  prefixIcon: Icon(Icons.search, color: textMuted),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      setState(() {
+                        showSearch = false;
+                        searchCtrl.clear();
+                        filtered = List.from(tasks);
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(width: 6),
+          _greySearchBtn(() {
+            setState(() => showSearch = !showSearch);
+          }),
+
+
+// ➕ ADD SCHEDULER (ICON ONLY)
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            color: textMain,
+            tooltip: "Add Scheduler",
+            onPressed: _addScheduler,
+          ),
+
+// 📄 EXPORT PDF (ICON ONLY)
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            color: textMain,
+            tooltip: "Export PDF",
+            onPressed: _exportPdf,
+          ),
+
+
+          // ☑️ SELECT ALL (TRI-STATE)
+          Checkbox(
+            tristate: true,
+            value: isAllSelected
+                ? true
+                : isPartiallySelected
+                ? null
+                : false,
+            onChanged: (val) {
+              setState(() {
+                if (val == true) {
+                  selectionMode = true;
+                  for (var t in filtered) {
+                    t.selected = true;
+                  }
+                } else {
+                  selectionMode = false;
+                  for (var t in filtered) {
+                    t.selected = false;
+                  }
+                }
+              });
+            },
+          ),
+
+          // 🗑 DELETE (ONLY WHEN SELECTED)
+          if (hasSelection)
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              color: Colors.red,
+              onPressed: _bulkDelete,
+            ),
+
+          // 🔽 FILTER + BULK STATUS
+          Builder(
+            builder: (btnContext) {
+              return IconButton(
+                icon: const Icon(Icons.filter_list),
+                onPressed: () {
+                  final box =
+                  btnContext.findRenderObject() as RenderBox;
+                  (
+                  context: context,
+                  anchor: box,
+                  );
+                },
+              );
+            },
+          ),
+
+          const SizedBox(width: 12),
+
+          const CircleAvatar(
+            radius: 16,
+            backgroundImage: NetworkImage("https://i.pravatar.cc/150"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webDashboard(BuildContext context) {
+    return Column(
+      children: [
+        // 🔒 FIXED STATS (DO NOT SCROLL)
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: _webStatsRow(),
+        ),
+
+        // 🔽 ONLY CARDS SCROLL
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: _webGrid(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _webStatsRow() {
+    return Row(
+      children: [
+        Expanded(child: _stat("Total Schedulers", tasks.length.toString())),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _stat(
+            "Pending",
+            tasks
+                .where((t) => t.status == "Pending")
+                .length
+                .toString(),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _stat(
+            "Approved",
+            tasks
+                .where((t) => t.status == "Approved")
+                .length
+                .toString(),
+          ),
+        ),
+        const SizedBox(width: 12),
+        _csvCard(),
+      ],
+    );
+  }
+
+
   Widget _stat(String title, String value) {
     return Container(
       height: 100,
@@ -1098,21 +1425,23 @@ class _TaskListPageState extends State<TaskListPage> {
 
 
   Widget _webGrid(BuildContext context) {
-    const double minCardWidth = 420;
-    const double spacing = 16;
-
     final double screenWidth = MediaQuery.of(context).size.width;
-    final double usableWidth = screenWidth - 32;
 
-    final int columnCount =
-    (usableWidth / (minCardWidth + spacing)).floor().clamp(1, 4);
+    // Sidebar (240) + padding (32)
+    final double available = screenWidth - 272;
+
+    // Desired card width
+    const double minCardWidth = 420;
+
+    // Calculate columns dynamically
+    final int columns = (available / minCardWidth).floor().clamp(1, 4);
 
     final double cardWidth =
-        (usableWidth - spacing * (columnCount - 1)) / columnCount;
+        (available - (16 * (columns - 1))) / columns;
 
     return Wrap(
-      spacing: spacing,
-      runSpacing: spacing,
+      spacing: 16,
+      runSpacing: 16,
       children: filtered.map((task) {
         return enableWebHero
             ? Hero(
@@ -2101,7 +2430,6 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
-
   Widget _mobileRow(Task task) {
     const double cardHeight = 190;
     const double actionWidth = 72;
@@ -2171,7 +2499,7 @@ class _TaskListPageState extends State<TaskListPage> {
                               // IMAGE
                               Expanded(
                                 flex: 35,
-                                child:GestureDetector(
+                                child: GestureDetector(
                                   onTap: () => _openImageViewer(task.imageUrl),
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(14),
@@ -2183,6 +2511,7 @@ class _TaskListPageState extends State<TaskListPage> {
                                   ),
                                 ),
                               ),
+
                               const SizedBox(width: 14),
 
                               // CONTENT
@@ -2325,6 +2654,7 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
 
+
   /// ===================== HELPERS =====================
 
   Widget _status(String status, {required bool isWeb}) {
@@ -2355,8 +2685,11 @@ class _TaskListPageState extends State<TaskListPage> {
       ),
     );
   }
-}
+
 /// ===================== ACTIONS =====================
+
+}
+
 
 // ===================== DUMMY DATA (LOCAL) =====================
 List<Task> mockTasks() {
@@ -2394,7 +2727,60 @@ List<Task> mockTasks() {
   ];
 }
 
+class _InlineSideBar extends StatelessWidget {
+  final bool collapsed;
+  final VoidCallback onAddScheduler;
+  final VoidCallback onExportPdf;
+  final Widget filterSection;
 
+  const _InlineSideBar({
+    required this.collapsed,
+    required this.onAddScheduler,
+    required this.onExportPdf,
+    required this.filterSection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: collapsed ? 72 : 240,
+      decoration: BoxDecoration(
+        color: surface, // 🔥 THIS LINE
+        border: Border(right: BorderSide(color: border)),
+      ),
+      child: Column(
+        children: [
+          /// 🔹 TOP SPACER
+          const SizedBox(height: 2),
+
+          /// 🔹 CENTERED MENU
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  filterSection,
+
+                  const SizedBox(height: 20),
+                  Divider(color: border),
+
+                  const SizedBox(height: 12),
+
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+/// 🧠 SINGLE MENU ITEM (PILL STYLE)
+
+}
 class _ActionsOverlayCard extends StatelessWidget {
   final VoidCallback onClose;
   final Widget actions;
@@ -2873,28 +3259,18 @@ class _MobileActionsColumn extends StatelessWidget {
 }
 class _ImageZoomViewer extends StatefulWidget {
   final String imageUrl;
-
   const _ImageZoomViewer({required this.imageUrl});
 
   @override
   State<_ImageZoomViewer> createState() => _ImageZoomViewerState();
 }
 class _ImageZoomViewerState extends State<_ImageZoomViewer> {
-  final TransformationController _controller =
-  TransformationController();
+  final TransformationController _controller = TransformationController();
+  double _scale = 1;
 
-  double _scale = 1.0;
-
-  void _zoomIn() {
+  void _zoom(double delta) {
     setState(() {
-      _scale = (_scale + 0.3).clamp(1.0, 4.0);
-      _controller.value = Matrix4.identity()..scale(_scale);
-    });
-  }
-
-  void _zoomOut() {
-    setState(() {
-      _scale = (_scale - 0.3).clamp(1.0, 4.0);
+      _scale = (_scale + delta).clamp(1.0, 4.0);
       _controller.value = Matrix4.identity()..scale(_scale);
     });
   }
@@ -2905,7 +3281,7 @@ class _ImageZoomViewerState extends State<_ImageZoomViewer> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          /// BACKDROP + CLOSE
+          /// CLOSE ON BACKDROP TAP
           GestureDetector(
             onTap: () => Navigator.pop(context),
             child: Container(color: Colors.transparent),
@@ -2924,7 +3300,7 @@ class _ImageZoomViewerState extends State<_ImageZoomViewer> {
             ),
           ),
 
-          /// TOP CLOSE
+          /// CLOSE
           Positioned(
             top: 40,
             right: 20,
@@ -2934,15 +3310,15 @@ class _ImageZoomViewerState extends State<_ImageZoomViewer> {
             ),
           ),
 
-          /// ZOOM CONTROLS
+          /// ZOOM BUTTONS
           Positioned(
             bottom: 40,
             right: 20,
             child: Column(
               children: [
-                _zoomBtn(Icons.add, _zoomIn),
+                _zoomBtn(Icons.add, () => _zoom(0.3)),
                 const SizedBox(height: 12),
-                _zoomBtn(Icons.remove, _zoomOut),
+                _zoomBtn(Icons.remove, () => _zoom(-0.3)),
               ],
             ),
           ),
@@ -2967,3 +3343,4 @@ class _ImageZoomViewerState extends State<_ImageZoomViewer> {
     );
   }
 }
+
